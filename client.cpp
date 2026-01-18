@@ -8,7 +8,17 @@
 #define SERVER_PORT 5000
 #define SERVER_ADDR "127.0.0.1"
 
-int readResponses()
+int readResponses(int fd, char* buff, size_t buff_size, int flag = 0){
+    ssize_t n = recv(fd, buff, buff_size - 1, flag);
+    if(n < 0){
+        perror("recv");
+        return -1;
+    }
+
+    buff[n] = '\0';
+
+    return n;
+}
 
 
 int main(){
@@ -25,9 +35,15 @@ int main(){
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(SERVER_PORT);
 
-    if(inet_pton(AF_INET, SERVER_ADDR, &client_addr.sin_addr) < 0){
-        perror("inet_pton");
-        return 1;
+    int ret = inet_pton(AF_INET, SERVER_ADDR, &client_addr.sin_addr);
+
+    if(ret <= 0){
+        if(ret < 0){
+            perror("inet_pton");
+            return 1;
+        }
+
+        std::cerr << "Invalid Address\n";
     }
 
     if(connect(client_fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
@@ -35,15 +51,11 @@ int main(){
         return 1;
     }
 
-    char buff[1024];
-    if(recv(client_fd, buff, sizeof(buff) - 1, 0) < 0){
-        perror("revc");
-        return 1;
+    char buff[1024] = {0};
+    
+    if(readResponses(client_fd, buff, sizeof(buff), 0) > 0){
+        std::cout << "Server: " << buff << std::endl;
     }
-
-    buff[sizeof(buff) - 1] = '\0';
-
-    std::cout << "Server: " << buff << std::endl;
 
     close(client_fd);
 }

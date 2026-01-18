@@ -108,7 +108,7 @@ int main(){
             max_fd = std::max(max_fd, fd);
         }
 
-        if(select(max_fd + 1, &fr, &fw, nullptr, nullptr) < 0){
+        if(select(max_fd + 1, &fr, nullptr, nullptr, nullptr) < 0){
             if(errno == EINTR) continue;
             perror("select");
             break;
