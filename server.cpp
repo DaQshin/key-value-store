@@ -11,13 +11,58 @@
 
 #define PORT 5000
 
-
 int sockopt = 1;
 fd_set fr, fw, fe;
 std::vector<int> fds;
 
-void setNBIO(){
+int setNBIO(int fd){
+    int flags = fcntl(fd, F_GETFL, 0);
+    if(flags == -1){
+        perror("fcntl F_GETFL");
+        return -1;
+    }
 
+    if(fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1){
+        perror("fcntl F_SETFL");
+        return -1;
+    }
+
+    return 0;
+
+}
+
+void sendResponse(std::string msg, int fd, int flag = 0){
+    if(send(fd, msg.c_str(), msg.size(), flag) < 0){
+        perror("send");
+    }
+}
+
+int acceptRequests(int server_fd){
+    if(FD_ISSET(server_fd, &fr)){
+        sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client_fd = accept(server_fd, (sockaddr*)& client_addr, &client_len);
+
+        if(client_fd < 0){
+            if(errno != EWOULDBLOCK && errno != EAGAIN){
+                perror("accept");
+            }
+            return -1;
+        }  
+
+
+        setNBIO(client_fd);
+        fds.push_back(client_fd);
+
+        std::string msg = "hello, client!";
+
+        sendResponse(msg, client_fd, MSG_NOSIGNAL);
+
+        std::cout << "client connected\n {fd = " << client_fd << "}" << std::endl;
+
+    }
+
+    return 0;
 }
 
 
@@ -36,6 +81,8 @@ int main(){
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
+    setNBIO(server_fd);
+
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
 
     if(bind(server_fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
@@ -52,20 +99,20 @@ int main(){
 
     while(1){
         FD_ZERO(&fr);
-        FD_ZERO(&fw);
 
         FD_SET(server_fd, &fr);
-        FD_SET(server_fd, &fw);
 
         int max_fd = server_fd;
         for(int fd: fds){
             FD_SET(fd, &fr);
-            FD_SET(fd, &fw);
-
-            max_fd = max(max_fd, fd);
+            max_fd = std::max(max_fd, fd);
         }
 
-        select(max_fd + 1, &fr, &fw, nullptr, nullptr);
+        if(select(max_fd + 1, &fr, &fw, nullptr, nullptr) < 0){
+            if(errno == EINTR) continue;
+            perror("select");
+            break;
+        }
 
         acceptRequests(server_fd);
     }
