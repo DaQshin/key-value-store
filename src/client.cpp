@@ -1,61 +1,117 @@
+#include <iostream>
+#include <stdlib.h>
+#include <errno.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
-#include <string>
-#include <iostream>
+#include <sys/socket.h>
+#include <netinet/ip.h>
+#include <string.h>
+#include <assert.h>
 
-#define SERVER_PORT 5000
-#define SERVER_ADDR "127.0.0.1"
+#define PORT 5000
 
-int readResponses(int fd, char* buff, size_t buff_size, int flag = 0){
-    ssize_t n = recv(fd, buff, buff_size - 1, flag);
-    if(n < 0){
-        perror("recv");
+static void msg(const char* msg){
+    fprintf(stderr, "%s\n", msg);
+}
+
+static void error_handler(const char* msg){
+    int err = errno;
+    fprintf(stderr, "[%d] %s\n", err, msg);
+    abort();
+}
+
+const size_t k_max_msg = 4096;
+
+static int32_t read_full(int fd, char* buffer, size_t n){
+    while(n){
+        ssize_t rv = read(fd, buffer, n);
+        if(rv <= 0) return -1;
+
+        assert((size_t)rv <= n);
+        n -= (size_t)rv;
+        buffer += rv;
+    }
+
+    return 0;
+}
+
+static int32_t write_all(int fd, const char* buffer, size_t n){
+    while(n){
+        ssize_t rv = write(fd, buffer, n);
+        if(rv <= 0) return -1;
+
+        assert((size_t)rv <= n);
+        n -= (size_t)rv;
+        buffer += rv;
+    }
+
+    return 0;
+}
+
+static int32_t one_request(int connfd){
+    char read_buffer[4 + k_max_msg];
+    errno = 0;
+    int32_t err = read_full(connfd, read_buffer, 4);
+    if(err){
+        msg(errno == 0 ? "EOF" : "read() error");
+        return err;
+    }
+
+    uint32_t len = 0;
+    memcpy(&len, read_buffer, 4);
+    if(len > k_max_msg){
+        msg("message length too long");
         return -1;
     }
 
-    buff[n] = '\0';
+    err = read_full(connfd, &read_buffer[4], len);
+    if(err){
+        msg("read() error");
+        return err;
+    }
 
-    return n;
+    fprintf(stderr, "Client: %.*s\n", len, &read_buffer[4]);
+
+    const char reply[] = "what is happening";
+    char write_buffer[4 + sizeof(reply)];
+    len = (uint32_t)strlen(reply);
+    memcpy(write_buffer, &len, 4);
+    memcpy(&write_buffer[4], reply, len);
+
+    int32_t rv = write_all(connfd, write_buffer, 4 + len);
+
+    return rv;
 }
 
 
 int main(){
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
 
-    int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if(client_fd < 0){
-        perror("socket");
-        return 1;
+    if(fd < 0){
+        error_handler("socket()");
     }
 
     sockaddr_in client_addr;
-    std::memset(&client_addr, 0, sizeof(client_addr));
     client_addr.sin_family = AF_INET;
-    client_addr.sin_port = htons(SERVER_PORT);
+    client_addr.sin_port = htons(PORT);
+    client_addr.sin_addr.s_addr = ntohl(INADDR_LOOPBACK);
 
-    int ret = inet_pton(AF_INET, SERVER_ADDR, &client_addr.sin_addr);
-
-    if(ret <= 0){
-        if(ret < 0){
-            perror("inet_pton");
-            return 1;
-        }
-
-        std::cerr << "Invalid Address\n";
+    if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
+        error_handler("connect()");
     }
 
-    if(connect(client_fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
-        perror("connect");
-        return 1;
+    char write_buffer[] = "hello server";
+    write(fd, write_buffer, sizeof(write_buffer));
+
+    char read_buffer[1024];
+    int n = read(fd, read_buffer, sizeof(read_buffer) - 1);
+    if(n < 0){
+        error_handler("read()");
     }
 
-    char buff[1024] = {0};
-    
-    if(readResponses(client_fd, buff, sizeof(buff), 0) > 0){
-        std::cout << "Server: " << buff << std::endl;
-    }
+    read_buffer[n] = '\0';
 
-    close(client_fd);
+    std::cout << "Server: " << read_buffer << std::endl;
+    close(fd);
+
 }

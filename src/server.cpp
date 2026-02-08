@@ -1,119 +1,143 @@
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/select.h>
-#include <fcntl.h>
-#include <cerrno>
-#include <string>
-#include <cstring>
-#include <vector>
-#include <algorithm>
 #include <iostream>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <netinet/ip.h>
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <assert.h>
+#include <string.h>
+#include <stdint.h>
 
 #define PORT 5000
 
-int sockopt = 1;
-fd_set fr, fw, fe;
-std::vector<int> fds;
-
-int setNBIO(int fd){
-    int flags = fcntl(fd, F_GETFL, 0);
-    if(flags == -1){
-        perror("fcntl F_GETFL");
-        return -1;
-    }
-
-    if(fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1){
-        perror("fcntl F_SETFL");
-        return -1;
-    }
-
-    return 0;
-
+static void msg(const char* msg){
+    fprintf(stderr, "%s\n", msg);
 }
 
-void sendResponse(std::string msg, int fd, int flag = 0){
-    if(send(fd, msg.c_str(), msg.size(), flag) < 0){
-        perror("send");
-    }
+static void error_handler(const char* msg){
+    int err = errno;
+    fprintf(stderr, "[%d] %s\n", err, msg);
+    abort();
 }
 
-int acceptRequests(int server_fd){
-    if(FD_ISSET(server_fd, &fr)){
-        sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        int client_fd = accept(server_fd, (sockaddr*)& client_addr, &client_len);
+const size_t k_max_msg = 4096;
 
-        if(client_fd < 0){
-            if(errno != EWOULDBLOCK && errno != EAGAIN){
-                perror("accept");
-            }
-            return -1;
-        }  
+static int32_t read_full(int fd, char* buffer, size_t n){
+    while(n){
+        ssize_t rv = read(fd, buffer, n);
+        if(rv <= 0) return -1;
 
-
-        setNBIO(client_fd);
-        fds.push_back(client_fd);
-
-        std::string msg = "hello, client!";
-
-        sendResponse(msg, client_fd, MSG_NOSIGNAL);
-
-        std::cout << "client connected\n {fd = " << client_fd << "}" << std::endl;
-
+        assert((size_t)rv <= n);
+        n -= (size_t)rv;
+        buffer += rv;
     }
 
     return 0;
 }
 
+static int32_t write_all(int fd, const char* buffer, size_t n){
+    while(n){
+        ssize_t rv = write(fd, buffer, n);
+        if(rv <= 0) return -1;
+
+        assert((size_t)rv <= n);
+        n -= (size_t)rv;
+        buffer += rv;
+    }
+
+    return 0;
+}
+
+static int32_t one_request(int connfd){
+    char read_buffer[4 + k_max_msg];
+    errno = 0;
+    int32_t err = read_full(connfd, read_buffer, 4);
+    if(err){
+        msg(errno == 0 ? "EOF" : "read() error");
+        return err;
+    }
+
+    uint32_t len = 0;
+    memcpy(&len, read_buffer, 4);
+    if(len > k_max_msg){
+        msg("message length too long");
+        return -1;
+    }
+
+    err = read_full(connfd, &read_buffer[4], len);
+    if(err){
+        msg("read() error");
+        return err;
+    }
+
+    fprintf(stderr, "Client: %.*s\n", len, &read_buffer[4]);
+
+    const char reply[] = "what is happening";
+    char write_buffer[4 + sizeof(reply)];
+    len = (uint32_t)strlen(reply);
+    memcpy(write_buffer, &len, 4);
+    memcpy(&write_buffer[4], reply, len);
+
+    int32_t rv = write_all(connfd, write_buffer, 4 + len);
+
+    return rv;
+}
+
+// static void rwtoclient(int connfd, const char* write_buffer){
+//     char read_buffer[64];
+//     ssize_t n = read(connfd, read_buffer, sizeof(read_buffer) - 1);
+//     if(n < 0){
+//         msg("read() error");
+//         return;
+//     }
+
+//     fprintf(stderr, "Client: %s\n", read_buffer);
+
+//     write(connfd, write_buffer, sizeof(write_buffer) - 1);
+// }
 
 int main(){
-
-    int server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if(server_fd < 0){
-        perror("socket");
-        return 1;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd < 0){
+        error_handler("socket()");
     }
 
     sockaddr_in server_addr;
-    std::memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
-    setNBIO(server_fd);
-
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
-
-    if(bind(server_fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
-        perror("bind");
-        return 1;
+    int val = 1;
+    if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) < 0){
+        error_handler("setsockopt()");
     }
 
-    if(listen(server_fd, 10) < 0){
-        perror("listen");
-        return 1;
+    if(bind(fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
+        error_handler("bind()");
     }
 
-    std::cout << "Server listening at port " << PORT << std::endl;
+    if(listen(fd, 10) < 0){
+        error_handler("listen()");
+    }
+
+    std::cout << "Server running at port:" << PORT << std::endl;
 
     while(1){
-        FD_ZERO(&fr);
-
-        FD_SET(server_fd, &fr);
-
-        int max_fd = server_fd;
-        for(int fd: fds){
-            FD_SET(fd, &fr);
-            max_fd = std::max(max_fd, fd);
+        sockaddr_in client_addr;
+        socklen_t addrlen = sizeof(client_addr);
+        int connfd = accept(fd, (sockaddr*)& client_addr, &addrlen);
+        if(connfd < 0 ){
+            continue;
         }
 
-        if(select(max_fd + 1, &fr, nullptr, nullptr, nullptr) < 0){
-            if(errno == EINTR) continue;
-            perror("select");
-            break;
+        while(1){
+            int32_t err = one_request(connfd);
+            if(err) break;
         }
-
-        acceptRequests(server_fd);
+        close(connfd);
     }
+
+    return 0;
+
 }
