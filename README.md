@@ -1,3 +1,6 @@
 # DISTRIBUTED KEY VALUE STORE
 
-- [Protocol](docs/protocol.md)
+
+-[Introduction]()
+-[Architecture]()
+-[Networking And Event Handling](docs/protocol.md)
