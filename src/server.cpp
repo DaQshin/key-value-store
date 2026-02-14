@@ -16,31 +16,6 @@
 
 #define PORT 5000
 
-void log_client_connection(const sockaddr_in& client_addr){
-    auto now = std::chrono::system_clock::now();
-    std::time_t t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm = *std::localtime(&t);
-
-    uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
-    uint32_t port = ntohs(client_addr.sin_port);
-
-    fprintf(stderr,
-        "New Connection [time: %04d-%02d-%02d %02d:%02d:%02d, address: %u.%u.%u.%u:%u]\n",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec,
-        (ip >> 24) & 0xFF,
-        (ip >> 16) & 0xFF,
-        (ip >> 8)  & 0xFF,
-        ip & 0xFF,
-        port
-    );
-}
-
-
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
 }
@@ -92,12 +67,31 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
 }
 
 static Conn* handle_accept(int fd){
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm = *std::localtime(&t);
+
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
     int connfd = accept(fd, (struct sockaddr*) &client_addr, &addrlen);
     if(connfd < 0){
         return nullptr;
     }
+
+    uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
+    uint32_t port = ntohs(client_addr.sin_port);
+    LOG_INFO("New Connection [time: %04d-%02d-%02d %02d:%02d:%02d, address: %u.%u.%u.%u:%u]\n",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec,
+        (ip >> 24) & 0xFF,
+        (ip >> 16) & 0xFF,
+        (ip >> 8)  & 0xFF,
+        ip & 0xFF,
+        port);
 
     fd_set_nb(connfd);
 
@@ -107,10 +101,35 @@ static Conn* handle_accept(int fd){
     return conn;
 
 }
+
+static bool try_one_request(Conn* conn){
+    if(conn->incoming.size() < 4) return false;
+
+    uint32_t len = 0;
+    memcpy(&len, conn->incoming.data(), 4);
+    if(len > k_max_msg){
+        msg("msg too long");
+        conn->want_close = true;
+        return false;
+    }
+
+    if(4 + len > conn->incoming.size()) return false;
+
+    const uint8_t* request = &conn->incoming[4];
+    LOG_INFO("Client: {len:%d data:%.*s\n}", len, len < 100 ? len : 100, request);
+    
+    buf_append(conn->outgoing, (const uint8_t*)&len, 4);
+    buf_append(conn->outgoing, request, len);
+
+    buf_consume(conn->incoming, 4 + len);
+
+    return true;
+}
+
+
 static void handle_write(Conn* conn){
     assert(conn->outgoing.size() > 0);
     ssize_t rv = write(conn->fd, &conn->outgoing, conn->outgoing.size());
-
     if(rv < 0 && errno == EAGAIN){
         return;
     }
@@ -133,9 +152,7 @@ static void handle_write(Conn* conn){
 static void handle_read(Conn* conn){
     uint8_t buf[64 * 1024];
     ssize_t rv = read(conn->fd, buf, sizeof(buf));
-    if(rv < 0 && errno == EAGAIN){
-        return ;
-    }
+    if(rv < 0 && errno == EAGAIN) return;
 
     if(rv < 0){
         msg_errno("read()");
@@ -154,74 +171,17 @@ static void handle_read(Conn* conn){
         return;
     }
 
+    buf_append(conn->incoming, buf, (size_t)rv);
+
+    while(try_one_request(conn)){}
+
+    if(conn->outgoing.size() > 0){
+        conn->want_read = false;
+        conn->want_write = true;
+        return handle_write(conn);
+    }
+
 }
-
-static int32_t read_full(int fd, char* buffer, size_t n){
-    while(n){
-        ssize_t rv = read(fd, buffer, n);
-
-        if(rv > 0 && rv <= n){
-            n -= (size_t)rv;
-            buffer += rv;
-        }
-        else if(rv == 0) return EOF;
-        else if(errno == EINTR) continue;
-        else return -1;
-    }
-
-    return 0;
-}
-
-static int32_t write_all(int fd, const char* buffer, size_t n){
-    while(n){
-        ssize_t rv = write(fd, buffer, n);
-        if(rv > 0 && rv <= n){
-            n -= (size_t)rv;
-            buffer += rv;
-        }
-        else if(rv == -1 || errno == EINTR) continue;
-        else return -1;
-    }
-
-    return 0;
-}
-
-static int32_t one_request(int connfd){
-    char rbuf[4 + k_max_msg];
-    errno = 0;
-    int32_t err = read_full(connfd, rbuf, sizeof(rbuf) - 1);
-    if(err){
-        msg(err == 0 ? "EOF" : "read() error");
-        return err;
-    }
-
-    int32_t len = 0;
-    memcpy(&len, rbuf, 4);
-    if(len > k_max_msg){
-        msg("message too long");
-        return -1;
-    }
-
-    err = read_full(connfd, &rbuf[4], len);
-    if(err){
-        msg("read() error");
-        return err;
-    }
-
-    printf("Client: %.*s", len, &rbuf[4]);
-
-    const char reply[] = "hello client";
-    char wbuf[4 + sizeof(reply)];
-    len = (int32_t)strlen(reply);
-    memcpy(wbuf, &len, 4);
-    memcpy(&wbuf, reply, len);
-
-    int32_t rv = write_all(connfd, wbuf, 4 + len);
-
-    return rv;
-}
-
-
 
 int main(){
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -286,7 +246,7 @@ int main(){
 
         for(ssize_t i = 1; i < poll_args.size(); i++){
             uint32_t ready = poll_args[i].revents;
-            Conn* conn = fd2conn{poll_args[i].fd};
+            Conn* conn = fd2conn[poll_args[i].fd];
             if(ready & POLLIN){
                 handle_read(conn);
             }
@@ -301,7 +261,5 @@ int main(){
             }
         }
     }
-
-    return 0;
 
 }

@@ -7,6 +7,7 @@
 #include <netinet/ip.h>
 #include <string.h>
 #include <assert.h>
+#include <vector>
 
 #define PORT 5000
 
@@ -107,6 +108,12 @@ int main(){
         error_handler("connect()");
     }
 
+    std::vector<std::string> query_list = {
+        "hello1", "hello2", "hello3",
+        std::string(k_max_msg, 'z'), // requires multiple event loop iterations
+        "hello5",
+    };
+
     // char write_buffer[] = "hello server";
     // write(fd, write_buffer, sizeof(write_buffer));
 
@@ -120,10 +127,12 @@ int main(){
 
     // std::cout << "Server: " << read_buffer << std::endl;
 
-
-    int32_t err = query(fd, "hello1");
-    if(err){
-        goto L_DONE;
+    int32_t err;
+    for(const std::string& q: query_list){
+        err = query(fd, (char*)q.data());
+        if(err){
+            goto L_DONE;
+        }
     }
 
     err = query(fd, "hello2");
