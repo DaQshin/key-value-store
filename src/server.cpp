@@ -48,13 +48,6 @@ static void fd_set_nb(int fd){
 
 const size_t k_max_msg = 32 << 20;
 
-struct Buffer{
-    uint8_t* buffer_begin;
-    uint8_t* buffer_end;
-    uint8_t* data_begin;
-    uint8_t* data_end;
-};
-
 struct Conn {
     int fd = -1;
     bool want_read = false;
@@ -71,10 +64,6 @@ static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t le
 
 static void buf_consume(std::vector<uint8_t> &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n);
-}
-
-static void buf_consume(struct Buffer* buf, size_t n){
-    buf->data_begin += n;
 }
 
 static Conn* handle_accept(int fd){
@@ -118,10 +107,9 @@ static bool try_one_request(Conn* conn){
 
     const uint8_t* request = &conn->incoming[4];
     LOG_INFO("Client: [len:%d data:%.*s\n]", len, len < 100 ? len : 100, request);
-
-    LOG_DEBUG("LENGTH( conn->outgoing ) = %d", conn->outgoing.size());
     
-    buf_append(conn->outgoing, (const uint8_t*)&len, 4);
+    uint32_t net_len = htonl(len);
+    buf_append(conn->outgoing, (const uint8_t*)&net_len, 4);
     buf_append(conn->outgoing, request, len);
 
     buf_consume(conn->incoming, 4 + len);
@@ -132,7 +120,7 @@ static bool try_one_request(Conn* conn){
 
 static void handle_write(Conn* conn){
     assert(conn->outgoing.size() > 0);
-    ssize_t rv = write(conn->fd, &conn->outgoing, conn->outgoing.size());
+    ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
     if(rv < 0 && errno == EAGAIN){
         return;
     }

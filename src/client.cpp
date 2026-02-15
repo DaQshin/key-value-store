@@ -91,8 +91,9 @@ static int32_t read_res(int fd){
         return err;
     }
 
-    uint32_t len = 0;
-    memcpy(&len, rbuf.data(), 4);
+    uint32_t net_len = 0;
+    memcpy(&net_len, rbuf.data(), 4);
+    uint32_t len = ntohl(net_len);
     if(len > k_max_msg){
         // msg("msg too long");
         LOG_DEBUG("read_res() - message length limit exceeded %d | read buffer size %d", len, rbuf.size());
@@ -123,7 +124,7 @@ int main(){
 
     sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
-    client_addr.sin_port = ntohs(PORT);
+    client_addr.sin_port = htons(PORT);
     client_addr.sin_addr.s_addr = ntohl(INADDR_LOOPBACK);
 
     if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
@@ -132,7 +133,7 @@ int main(){
 
     std::vector<std::string> query_list = {
         "hello1", "hello2", "hello3",
-        // std::string(k_max_msg, 'z'),
+        std::string(k_max_msg, 'z'),
         "hello5",
     };
 
