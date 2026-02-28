@@ -79,7 +79,7 @@ static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out)
     uint8_t status = 0;
     std::string val;
     if(cmd.size() == 2 && cmd[0] == "GET"){
-        auto it = globa_ds.find(cmd[1]);
+        auto it = global_ds.find(cmd[1]);
         if(it == global_ds.end()) status = RES_NX;
         val = it->second;
     }
@@ -87,7 +87,7 @@ static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out)
         global_ds[cmd[1]] = std::move(cmd[2]);
     }
     else if(cmd.size() == 2 && cmd[0] == "DEL"){
-        delete global_ds[cmd[1]];
+        global_ds.erase(cmd[1]);
     }
     else status = RES_ERR;
 
@@ -114,15 +114,15 @@ static bool read_str(const uint8_t* cur, const uint8_t* end, size_t n, std::stri
 }
 
 static int32_t parse_req(const uint8_t* data, size_t size, std::vector<std::string>& out){
-    const uint32_t* end = data + size;
+    const uint8_t* end = data + (uint8_t)size;
     uint32_t nstr = 0;
-    if(!read_u32(data, end, nstr)) return -1;
+    if(!read_u32(data, end, &nstr)) return -1;
 
     if(nstr > k_max_msg) return -1;
 
     while(out.size() < nstr){
         uint32_t len = 0;
-        if(!read_u32(data, end, len)) return -1;
+        if(!read_u32(data, end, &len)) return -1;
 
         out.push_back(std::string());
         if(!read_str(data, end, len, out.back())) return -1;
@@ -176,7 +176,13 @@ static bool try_one_request(Conn* conn){
     const uint8_t* request = &conn->incoming[4];
     LOG_INFO("Client: [len:%d data:%.*s\n]", len, len < 100 ? len : 100, request);
     
-    do_req
+    std::vector<std::string> cmd;
+    if(parse_req(request, len, cmd) < 0){
+        msg("bad request");
+        return false;
+    }
+
+    do_request(cmd, conn->outgoing);
 
     buf_consume(conn->incoming, 4 + len);
 
