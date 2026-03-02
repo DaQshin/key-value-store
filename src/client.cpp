@@ -12,7 +12,7 @@
 
 #define PORT 5000
 
-const size_t k_max_msg = 32 << 20;
+const size_t k_max_msg = 4096;
 
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
@@ -63,59 +63,64 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n);
 }
 
-static int32_t send_req(int fd, const uint8_t* msg, size_t len){
-
-    LOG_DEBUG("send_req() - length: %d", len);
-
-    if(len > k_max_msg){
-        return -1;
+static int send_req(int fd, std::vector<std::string>& cmd){
+    uint32_t len = 4;
+    for(const std::string& s: cmd){
+        len += 4 + s.size();
     }
 
-    std::vector<uint8_t> wbuf;
-    buf_append(wbuf, (const uint8_t*)&len, 4);
-    buf_append(wbuf, msg, len);
-    return write_all(fd, wbuf.data(), wbuf.size());
+    if(len > k_max_msg) return -1;
+
+    uint8_t wbuf[4 + k_max_msg];
+    memcpy(&wbuf[0], &len, 4);
+    uint32_t cur = 4;
+    for(const std::string& s: cmd){
+        uint32_t n = (uint32_t)s.size();
+        memcpy(&wbuf[cur], &n, 4);
+        memcpy(&wbuf[cur + 4], s.data(), n);
+        cur += 4 + n;
+    }
+
+    return write_all(fd, wbuf, 4 + len);
 }
 
 static int32_t read_res(int fd){
-    std::vector<uint8_t> rbuf;
-    rbuf.resize(4);
+    uint8_t rbuf[4 + k_max_msg];
     errno = 0;
-    int32_t err = read_full(fd, &rbuf[0], 4);
+    int32_t err = read_full(fd, rbuf, 4);
     if(err){
         if(errno == 0){
             msg("EOF");
         }
-        else msg("read_full()");
-
+        else msg("read()");
         return err;
     }
 
-    uint32_t net_len = 0;
-    memcpy(&net_len, rbuf.data(), 4);
-    uint32_t len = ntohl(net_len);
+    uint32_t len = 0;
+    memcpy(&len, rbuf, 4);
     if(len > k_max_msg){
-        // msg("msg too long");
-        LOG_DEBUG("read_res() - message length limit exceeded %d | read buffer size %d", len, rbuf.size());
-        LOG_DEBUG("Raw length bytes: %02x %02x %02x %02x\n",
-       rbuf[0], rbuf[1], rbuf[2], rbuf[3]);
+        msg("too long");
         return -1;
     }
 
-    rbuf.resize(4 + len);
-    err = read_full(fd, &rbuf[4], len);
-    LOG_DEBUG("read_res() - message: %s", (const uint8_t*)&rbuf[4]);
+    err = read_full(fd, &rbuf[4], 4);
     if(err){
         msg("read()");
-        return err;
+        return -1;
     }
 
-    LOG_DEBUG("read_res() - len:%u data:%.*s\n", len, len < 100 ? len : 100, &rbuf[4]);
-    return 0;
+    uint32_t status_code = 0;
+    if(len < 4){
+        msg("bad response");
+        return -1;
+    }
 
+    memcpy(&status_code, &rbuf[4], 4);
+    LOG_INFO("server says: [%u] %.*s\n", status_code, len - 4, &rbuf[8]);
+    return 0;
 }
 
-int main(){
+int main(int argc, char** argv){
     int fd = socket(AF_INET, SOCK_STREAM, 0);
 
     if(fd < 0){
@@ -131,29 +136,18 @@ int main(){
         die("connect()");
     }
 
-    std::vector<std::string> query_list = {
-        "hello1", "hello2", "hello3",
-        std::string(k_max_msg, 'z'),
-        "hello5",
-    };
-
-    int32_t err;
-    for(const std::string& q: query_list){
-        err = send_req(fd, (uint8_t *)q.data(), q.size());
-        if(err){
-            goto L_DONE;
-        }
+    std::vector<std::string> cmd;
+    for(int i = 0; i < argc; ++i){
+        cmd.push_back(argv[i]);
     }
 
-    for(int i = 0; i < query_list.size(); i++){
-        err = read_res(fd);
-        if(err){
-            goto L_DONE;
-        }
-    }
-    
+    int32_t err = send_req(fd, cmd);
+    if(err) goto L_DONE;
+
+    err = read_res(fd);
+    if(err) goto L_DONE;
 
     L_DONE:
         close(fd);
-
+        return 0;
 }
