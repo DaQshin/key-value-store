@@ -130,7 +130,7 @@ int main(int argc, char** argv){
     sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(PORT);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
 
     if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
         die("connect()");

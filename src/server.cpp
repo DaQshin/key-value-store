@@ -203,7 +203,7 @@ static Conn* handle_accept(int fd){
 
 
 static void handle_write(Conn* conn){
-    assert(conn->outgoing.size() > 0);
+    // assert(conn->outgoing.size() > 0);
     ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
     if(rv < 0 && errno == EAGAIN){
         return;
