@@ -13,7 +13,7 @@
 #include <netinet/ip.h>
 #include <vector>
 #include <map>
-#include "log.cpp"
+#include "logging/log.cpp"
 
 #define PORT 5000
 #define MAX_EVENTS 64
@@ -130,13 +130,13 @@ static int32_t parse_req(const uint8_t*& data, size_t size, std::vector<std::str
 
     while(out.size() < nstr){
         uint32_t len = 0;
-        if(!read_u32(data, end, &len)) std::cout << "path" << 3 << std::endl;
+        if(!read_u32(data, end, &len)) return -1;
 
         out.push_back(std::string());
-        if(!read_str(data, end, len, out.back())) std::cout << "path" << 4 << std::endl;
+        if(!read_str(data, end, len, out.back())) return -1;
     }
 
-    if(data != end) std::cout << "path" << 5 << std::endl;
+    if(data != end) return -1;
 
     return 0;
 }
