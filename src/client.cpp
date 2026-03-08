@@ -130,13 +130,12 @@ int main(int argc, char** argv){
     sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(PORT);
-    client_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
     if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
         die("connect()");
     }
 
-    
     std::vector<std::string> commands;
     for(int i = 1; i < argc; i++){
         if(i + 1 >= argc){

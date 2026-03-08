@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/epoll.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -15,6 +16,7 @@
 #include "log.cpp"
 
 #define PORT 5000
+#define MAX_EVENTS 64
 
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
@@ -256,8 +258,8 @@ static void handle_read(Conn* conn){
 }
 
 int main(){
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(fd < 0){
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(server_fd < 0){
         die("socket()");
     }
 
@@ -267,71 +269,56 @@ int main(){
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
     int val = 1;
-    if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) < 0){
+    if(setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) < 0){
         die("setsockopt()");
     }
 
-    if(bind(fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
+    if(bind(server_fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
         die("bind()");
     }
 
-    if(listen(fd, 10) < 0){
+    if(listen(server_fd, SOMAXCONN) < 0){
         die("listen()");
     }
 
-    LOG_INFO("server starting on port %d", PORT);
+    LOG_INFO("server running on port %d", PORT);
 
-    std::vector<Conn*> fd2conn;
-    std::vector<pollfd> poll_args;
-    while(1){
-        poll_args.clear();
-        struct pollfd srvfd = {fd, POLLIN, 0};
-        poll_args.push_back(srvfd);
+    int epoll_fd = epoll_create1(0);
 
-        for(Conn* conn: fd2conn){
-            if(!conn) continue;
-            struct pollfd clfd = {conn->fd, POLLERR, 0};
-            if(conn->want_read){
-                clfd.events |= POLLIN;
-            }
-            if(conn->want_write){
-                clfd.events |= POLLOUT;
-            }
-            poll_args.push_back(clfd);
-
-        }
-
-        int rv = poll(poll_args.data(), (nfds_t)poll_args.size(), -1);
-        if(rv < 0 && errno == EINTR){
-            continue;
-        }
-        if(rv < 0) die("poll()");
-
-        if(poll_args[0].revents){
-            if(Conn* conn = handle_accept(fd)){
-                if(fd2conn.size() <= (size_t)conn->fd){
-                    fd2conn.resize(conn->fd + 1);
-                }
-                fd2conn[conn->fd] = conn;
-            }
-        }
-
-        for(ssize_t i = 1; i < poll_args.size(); i++){
-            uint32_t ready = poll_args[i].revents;
-            Conn* conn = fd2conn[poll_args[i].fd];
-            if(ready & POLLIN){
-                handle_read(conn);
-            }
-            if(ready & POLLOUT){
-                handle_write(conn);
-            }
-
-            if((ready & POLLERR) || conn->want_close){
-                close(conn->fd);
-                fd2conn[conn->fd] = nullptr;
-                delete conn;
-            }
-        }
+    if(epoll_fd < 0){
+        die("epoll_create1()");
     }
 
+    epoll_event sev{};
+    sev.events = EPOLLIN;
+    sev.data.fd = server_fd;
+
+    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &sev) < 0){
+        die("epoll_ctl");
+    }
+
+    epoll_event events[MAX_EVENTS];
+
+    while(true){
+        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        if(n < 0){
+            die("epoll_wait()");
+        }
+
+        for(int i = 0; i < n; i++){
+            int fd = events[i].data.fd;
+            if(fd == server_fd){
+                Conn* conn = handle_accept(fd);
+
+                epoll_event cev{};
+                cev.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLET;
+                cev.data.fd = conn->fd;
+                if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->fd, &cev) < 0){
+                    msg("epoll_ctl()");
+                    continue;
+                }
+            }
+        }
+        
+    }
 }
