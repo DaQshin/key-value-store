@@ -13,7 +13,7 @@
 #include <netinet/ip.h>
 #include <vector>
 #include <map>
-#include "logging/log.cpp"
+#include "../include/log.h"
 
 #define PORT 5000
 #define MAX_EVENTS 64
@@ -69,11 +69,11 @@ enum {
 static std::map<std::string, std::string> global_ds;
 
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
-    buf.insert(buf.end(), data, data + len); // to be optimized
+    buf.insert(buf.end(), data, data + len); // O(n) everytime!!
 }
 
 static void buf_consume(std::vector<uint8_t> &buf, size_t n){
-    buf.erase(buf.begin(), buf.begin() + n); // to be optimized 
+    buf.erase(buf.begin(), buf.begin() + n); // O(n) everytime!! 
 }
 
 static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){

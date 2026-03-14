@@ -1,22 +1,25 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
-TARGET := dkvs
+CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -Iinclude
 
-SRC := $(wildcard src/*.cpp)
-OBJ := $(SRC:.cpp=.o)
+BUILD := build
 
 .PHONY: all clean run
 
-all: $(TARGET)
+all: $(BUILD)/client $(BUILD)/server
 
-$(TARGET): $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+$(BUILD)/client: src/client.cpp src/logging/log.cpp
+	mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(BUILD)/server: src/server.cpp src/logging/log.cpp
+	mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
-run: $(TARGET)
-	./$(TARGET)
+run_server: all 
+			./$(BUILD)/server
+
+run_client: all 
+			./$(BUILD)/client
 
 clean:
-	rm -f $(TARGET) $(OBJ)
+	rm -rf $(BUILD)

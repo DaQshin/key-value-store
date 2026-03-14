@@ -8,7 +8,7 @@
 #include <string.h>
 #include <assert.h>
 #include <vector>
-#include "log.cpp"
+#include "../include/log.h"
 
 #define PORT 5000
 
