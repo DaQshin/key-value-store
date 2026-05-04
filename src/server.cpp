@@ -19,6 +19,7 @@
 #define PORT 5000
 #define MAX_EVENTS 64
 
+
 #define container_of(ptr, T, member) \
     ((T*)(char*)(ptr) - offsetof(T, member))
 
@@ -67,13 +68,6 @@ struct Conn {
     Buffer outgoing;
 };
 
-
-// enum {
-//     RES_OK = 0,
-//     RES_ERR = 1,
-//     RES_NX = 2
-// };
-
 enum {
     ERR_UNKNOWN = 1,
     ERR_TOO_BIG = 2
@@ -89,25 +83,12 @@ enum {
 };
 
 static void buf_append(Buffer &buf, const uint8_t* data, size_t len){
-    printf("buf_append()\n");
-    buf.insert(buf.end(), data, data + len); // Buffer()
+    buf.insert(buf.end(), data, data + len); // O(n)
 }
 
 static void buf_consume(Buffer &buf, size_t n){
-    printf("buf_consume()\n");
-    buf.erase(buf.begin(), buf.begin() + n); // Buffer() 
+    buf.erase(buf.begin(), buf.begin() + n); // O(n)
 }
-
-// static void make_response(const std::string& val, uint32_t status, Buffer& out){
-
-//     std::cout << "data: " << val << std::endl;
-
-//     uint32_t res_len = 4 + (uint32_t)val.size();
-//     printf("res_len = [%d]  status = [%d]\n", res_len, status);
-//     buf_append(out, (const uint8_t*)& res_len, 4);
-//     buf_append(out, (const uint8_t*)& status, 4);
-//     buf_append(out, (const uint8_t*)val.data(), (size_t)val.size());
-// }
 
 static uint32_t str_hash(const uint8_t* data, size_t len){
     // FNV-1a
@@ -134,7 +115,6 @@ static bool entry_eq(HNode* lhs, HNode* rhs){
     struct Entry* r = container_of(rhs, struct Entry, node);
     return l->key == r->key;
 }
-
 
 static void buf_append_u8(Buffer& buf, uint8_t data){
     buf.push_back(data);
@@ -252,7 +232,6 @@ static void flush(Buffer& out){
 }
 
 static void exists(std::vector<std::string>& cmd, Buffer& out){
-    printf("in exists()");
     struct Entry key;
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
@@ -263,8 +242,6 @@ static void exists(std::vector<std::string>& cmd, Buffer& out){
 }
 
 static void do_request(std::vector<std::string>& cmd, Buffer& out){
-
-    printf("do_request()\n");
 
     LOG_INFO("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
          (void*)g_data.db.newer.table,
@@ -314,6 +291,21 @@ static void do_request(std::vector<std::string>& cmd, Buffer& out){
 
 }
 
+/*
+Protocol:
+
+Request:
+[4B total_len]
+[4B nstr]
+repeat nstr:
+    [4B len][bytes]
+
+Response:
+[4B total_len]
+[1B tag][payload...]
+
+*/
+
 static bool read_u32(const uint8_t*& cur, const uint8_t*& end, uint32_t* out){
     if(cur + 4 > end) return false;
 
@@ -349,16 +341,15 @@ static int32_t parse_req(const uint8_t*& data, size_t size, std::vector<std::str
     return 0;
 }
 
-void log_payload(const uint8_t* data, size_t len) {
-    printf("payload (%zu bytes): ", len);
-    for (size_t i = 0; i < len; i++) {
-        printf("%02x ", data[i]);
-    }
-    printf("\n");
-}
+// void log_payload(const uint8_t* data, size_t len) {
+//     printf("payload (%zu bytes): ", len);
+//     for (size_t i = 0; i < len; i++) {
+//         printf("%02x ", data[i]);
+//     }
+//     printf("\n");
+// }
 
 static void resp_header_alloc(Buffer& out, size_t* header){
-    printf("resp_header_alloc()\n");
     *header = out.size();
     buf_append_u32(out, 0);
 }
@@ -368,7 +359,6 @@ static size_t resp_size(Buffer& out, size_t header){
 }
 
 static void resp_header_assign(Buffer& out, size_t header){
-    printf("resp_header_assign()\n");
     size_t msg_size = resp_size(out, header);
     if(msg_size > k_max_msg){
         printf("Response is too big.");
@@ -385,8 +375,6 @@ static void resp_header_assign(Buffer& out, size_t header){
 static bool try_one_request(Conn* conn){
     if(conn->incoming.size() < 4) return false;
 
-    printf("in try_one_request\n");
-
     uint32_t total_len = 0;
     memcpy(&total_len, conn->incoming.data(), 4);
     if(total_len > k_max_msg){
@@ -399,7 +387,7 @@ static bool try_one_request(Conn* conn){
 
     const uint8_t* request = &conn->incoming[4];
 
-    log_payload(request, total_len);
+    // log_payload(request, total_len);
     
     std::vector<std::string> cmd;
     if(parse_req(request, total_len, cmd) < 0){

@@ -1,7 +1,14 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -Iinclude
+CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
+MODE ?= debug
 
 BUILD := build
+
+ifneq ($(MODE), debug)
+	CXXFLAGS += -O2
+else
+	CXXFLAGS += -g -O0
+endif
 
 .PHONY: all clean run
 

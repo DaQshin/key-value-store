@@ -308,6 +308,10 @@ int main(int argc, char** argv){
         else if(std::string(argv[i]) == "FLUSH"){
             commands.push_back("FLUSH");
         }
+        else if(std::string(argv[i]) == "EXISTS"){
+            commands.push_back("EXISTS");
+            commands.push_back(argv[++i]);
+        }
     }
 
     int32_t err = send_req(fd, commands);
