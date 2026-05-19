@@ -3,10 +3,13 @@ name: AVL Tree Test
 on:
   push:
     paths-ignore:
-      - "README.MD"
+      - "README.md"
       - ".gitignore"
       - "Makefile"
       - "docs/**"
+    branches: [main]
+
+  pull_request:
     branches: [main]
 
 jobs:
@@ -16,10 +19,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compile Test
-        run: g++ ./tests/test_avl.cpp -Iinclude -o test_avl
+        run: g++ -std=c++17 -Wall -Wextra tests/test_avl.cpp src/storage/avl.cpp -Iinclude -o test_avl
 
       - name: Runtime Test
         run: ./test_avl
-
-      - name: Echo message
-        run: echo "workflow executed"
