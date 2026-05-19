@@ -1,0 +1,22 @@
+name: AVL Tree Test
+
+on:
+  push:
+    paths-ignore:
+      - "README.MD"
+      - ".gitignore"
+      - "Makefile"
+      - "docs/**"
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile Test
+        run: g++ ./tests/test_avl.cpp -o test_avl
+
+      - name: Runtime Test
+        run: ./test_avl
