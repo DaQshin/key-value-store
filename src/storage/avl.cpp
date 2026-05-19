@@ -13,10 +13,12 @@ static void avl_update(AVLNode* node){
 static AVLNode* rot_left(AVLNode* node){
     AVLNode* parent = node->parent;
     AVLNode* right = node->right;
-    AVLNode* left = right->left;
+    AVLNode* inner = right->left;
+
+    node->right = inner;
+    if (inner) inner->parent = node;
 
     right->left = node;
-    node->left = left;
     node->parent = right;
     right->parent = parent;
 
@@ -29,10 +31,12 @@ static AVLNode* rot_left(AVLNode* node){
 static AVLNode* rot_right(AVLNode* node){
     AVLNode* parent = node->parent;
     AVLNode* left = node->left;
-    AVLNode* right = left->right;
+    AVLNode* inner = left->right;
+
+    node->left = inner;
+    if (inner) inner->parent = node;
 
     left->right = node;
-    node->right = right;
     node->parent = left;
     left->parent = parent;
 
@@ -94,7 +98,7 @@ static AVLNode* avl_del_one(AVLNode* node){
 
     if(!parent) return child;
 
-    AVLNode** from = parent->left ? &parent->left : &parent->right;
+    AVLNode** from = parent->left == node ? &parent->left : &parent->right;
     *from = child;
 
     return avl_fix(parent);
