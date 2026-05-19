@@ -21,7 +21,7 @@
 
 
 #define container_of(ptr, T, member) \
-    ((T*)(char*)(ptr) - offsetof(T, member))
+    ((T*)((char*)(ptr) - offsetof(T, member)))
 
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
