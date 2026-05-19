@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compile Test
-        run: g++ ./tests/test_avl.cpp -o test_avl
+        run: g++ ./tests/test_avl.cpp -Iinclude -o test_avl
 
       - name: Runtime Test
         run: ./test_avl
