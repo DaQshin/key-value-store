@@ -6,13 +6,8 @@ static uint32_t max(uint32_t lhs, uint32_t rhs){
 }
 
 static void avl_update(AVLNode* node){
-    node->height = 1 + max(get_avl_height(node->left), get_avl_height(node->right));
-    node->count = 1 + get_avl_count(node->left) + get_avl_count(node->right);
-}
-
-static AVLNode* avl_get_parent(AVLNode* node){
-    uintptr_t p = (uintptr_t)node->parent;
-    return (AVLNode*)(p & (~0b11) );
+    node->height = 1 + max(avl_height(node->left), avl_height(node->right));
+    node->count = 1 + avl_count(node->left) + avl_count(node->right);
 }
 
 static AVLNode* rot_left(AVLNode* node){

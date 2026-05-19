@@ -17,8 +17,8 @@ inline void avl_init(AVLNode* node){
     node->count = 1;
 }
 
-inline uint32_t get_avl_height(AVLNode* node){ return node ? node->height : 0;}
-inline uint32_t get_avl_count(AVLNode* node){return node ? node->count : 0;}
+inline uint32_t avl_height(AVLNode* node){ return node ? node->height : 0;}
+inline uint32_t avl_count(AVLNode* node){return node ? node->count : 0;}
 
 AVLNode* avl_fix(AVLNode* node);
 AVLNode* avl_del(AVLNode* node);
