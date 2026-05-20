@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <iostream>
 #include <assert.h>
 #include <set>
 #include "avl.h"
@@ -76,7 +77,6 @@ static void avl_verify(AVLNode* parent, AVLNode* node){
         assert(container_of(node->right, Data, node)->val >= val);
     }
 }
-
 
 static void extract(AVLNode* node, std::multiset<uint32_t>& extracted){
     if(!node) return;
@@ -163,6 +163,7 @@ int main() {
     // some quick tests
     container_verify(c, ref);
     add(c, 123);
+    ref.insert(123);
     container_verify(c, ref);
     assert(!erase(c, 124));
     assert(erase(c, 123));
@@ -183,6 +184,7 @@ int main() {
         ref.insert(val);
         container_verify(c, ref);
     }
+
 
     // random deletion
     for (uint32_t i = 0; i < 200; i++) {

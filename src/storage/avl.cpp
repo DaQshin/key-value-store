@@ -104,27 +104,27 @@ static AVLNode* avl_del_one(AVLNode* node){
     return avl_fix(parent);
 }
 
-AVLNode* avl_del(AVLNode* node){
-    if(!node->left || !node->right) return avl_del_one(node);
-
-    AVLNode* victim = node->right;
-    while(victim->left){
+AVLNode *avl_del(AVLNode *node) {
+    if (!node->left || !node->right) {
+        return avl_del_one(node);
+    }
+    AVLNode *victim = node->right;
+    while (victim->left) {
         victim = victim->left;
     }
-
-    AVLNode* root = avl_del_one(victim);
-
-    *victim = *node;
-
-    if(victim->left) victim->left->parent = victim;
-    if(victim->right) victim->right->parent = victim;
-
-    AVLNode** from = &root;
-    AVLNode* parent = node->parent;
-    if(parent)
+    AVLNode *root = avl_del_one(victim);
+    *victim = *node;    
+    if (victim->left) {
+        victim->left->parent = victim;
+    }
+    if (victim->right) {
+        victim->right->parent = victim;
+    }
+    AVLNode **from = &root;
+    AVLNode *parent = node->parent;
+    if (parent) {
         from = parent->left == node ? &parent->left : &parent->right;
-
+    }
     *from = victim;
     return root;
-
 }
