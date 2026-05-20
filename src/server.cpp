@@ -15,13 +15,11 @@
 #include <map>
 #include "log.h"
 #include "hashtable.h"
+#include "utils.h"
 
 #define PORT 5000
 #define MAX_EVENTS 64
 
-
-#define container_of(ptr, T, member) \
-    ((T*)((char*)(ptr) - offsetof(T, member)))
 
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
@@ -88,16 +86,6 @@ static void buf_append(Buffer &buf, const uint8_t* data, size_t len){
 
 static void buf_consume(Buffer &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n); // O(n)
-}
-
-static uint32_t str_hash(const uint8_t* data, size_t len){
-    // FNV-1a
-    uint32_t h = 0x811C9DC5;
-    for(size_t i = 0; i < len; i++){
-        h = (h ^ data[i]) * 0x01000193;
-    }
-
-    return h;
 }
 
 static struct {

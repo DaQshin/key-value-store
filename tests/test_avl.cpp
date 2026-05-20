@@ -4,10 +4,7 @@
 #include <assert.h>
 #include <set>
 #include "avl.h"
-
-#define container_of(ptr, type, member) ({   \
-    (type *)((char *) ptr - offsetof(type, member));  \
-})
+#include "utils.h"
 
 struct Data{
     AVLNode node;

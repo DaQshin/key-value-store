@@ -1,12 +1,10 @@
 #include <assert.h>
+#include <algorithm>
 #include "avl.h"
-
-static uint32_t max(uint32_t lhs, uint32_t rhs){
-    return lhs > rhs ? lhs : rhs;
-}
+#include "utils.h"
 
 static void avl_update(AVLNode* node){
-    node->height = 1 + max(avl_height(node->left), avl_height(node->right));
+    node->height = 1 + std::max(avl_height(node->left), avl_height(node->right));
     node->count = 1 + avl_count(node->left) + avl_count(node->right);
 }
 
