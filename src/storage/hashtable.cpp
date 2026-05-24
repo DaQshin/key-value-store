@@ -89,12 +89,23 @@ void hm_insert(HMap* hmap, HNode* node){
     hm_migrate_keys(hmap);
 }
 
-void hm_clear(HMap* hmap){
+static HNode* hm_delete(HMap* hmap, HNode* node, bool (eq*)(HNode*, HNode*)){
+    if(HNode** node = h_lookup(&hmap->older, node, eq)){
+        return h_detach(&hmap->older, node);
+    }
+
+    else if(HNode** node = h_lookup(&hmap->newer, node, eq)){
+        return h_detach(&hamp->newer, node);
+    }
+
+}
+
+static void hm_clear(HMap* hmap){
     free(hmap->older.table);
     free(hmap->newer.table);
     *hmap = HMap{};
 }
 
-size_t hm_size(HMap* hmap){
+static size_t hm_size(HMap* hmap){
     return hmap->older.size + hmap->newer.size;
 }

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <assert.h>
 #include <vector>
-#include "../include/log.h"
+// #include "log.h"
 #define PORT 5000
 
 const size_t k_max_msg = 4096;
@@ -142,7 +142,7 @@ static int32_t print_response(const uint8_t* data, size_t size){
 static int32_t read_full(int fd, uint8_t* read_buffer, size_t n){
     while(n > 0){
         ssize_t rv = read(fd, read_buffer, n);
-        LOG_DEBUG("Bytes read: %zd", rv);
+        // LOG_DEBUG("Bytes read: %zd", rv);
         if(rv <= 0){
             return -1;
         }
@@ -158,7 +158,7 @@ static int32_t read_full(int fd, uint8_t* read_buffer, size_t n){
 static int32_t write_all(int fd, const uint8_t* write_buffer, size_t n){
     while(n > 0){
         ssize_t rv = write(fd, write_buffer, n);
-        LOG_DEBUG("bytes written: %zd", rv);
+        // LOG_DEBUG("bytes written: %zd", rv);
         if(rv <= 0){
             return -1;
         }

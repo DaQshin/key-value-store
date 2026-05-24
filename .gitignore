@@ -6,5 +6,5 @@
 a.out
 *.exe 
 
-/build
-/logging
+build/
+logging/

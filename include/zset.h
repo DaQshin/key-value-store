@@ -4,7 +4,7 @@
 #include "hashtable.h"
 
 struct ZSet{
-    AVLNode* root = nullptr;
+    AVLNode* tree = nullptr;
     HMap hmap;
 };
 

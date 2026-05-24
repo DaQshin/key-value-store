@@ -13,9 +13,9 @@
 #include <netinet/ip.h>
 #include <vector>
 #include <map>
-#include "log.h"
 #include "hashtable.h"
 #include "utils.h"
+// #include "log.h"
 
 #define PORT 5000
 #define MAX_EVENTS 64
@@ -81,11 +81,11 @@ enum {
 };
 
 static void buf_append(Buffer &buf, const uint8_t* data, size_t len){
-    buf.insert(buf.end(), data, data + len); // O(n)
+    buf.insert(buf.end(), data, data + len); 
 }
 
 static void buf_consume(Buffer &buf, size_t n){
-    buf.erase(buf.begin(), buf.begin() + n); // O(n)
+    buf.erase(buf.begin(), buf.begin() + n); 
 }
 
 static struct {
@@ -231,41 +231,41 @@ static void exists(std::vector<std::string>& cmd, Buffer& out){
 
 static void do_request(std::vector<std::string>& cmd, Buffer& out){
 
-    LOG_INFO("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
-         (void*)g_data.db.newer.table,
-         g_data.db.newer.mask,
-         g_data.db.newer.size);
+    // LOG_INFO("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
+    //      (void*)g_data.db.newer.table,
+    //      g_data.db.newer.mask,
+    //      g_data.db.newer.size);
     
     if(cmd.size() == 2 && cmd[0] == "GET"){
-        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-         cmd[1].c_str());
+        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+        //  cmd.size(),
+        //  cmd[0].c_str(),
+        //  cmd[1].c_str());
         get(cmd, out);
     }
 
     else if(cmd.size() == 3 && cmd[0] == "SET"){
-        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s cmd[2]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-         cmd[1].c_str(),
-        cmd[2].c_str());
+        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s cmd[2]=%s",
+        //  cmd.size(),
+        //  cmd[0].c_str(),
+        //  cmd[1].c_str(),
+        // cmd[2].c_str());
         set(cmd, out);
     }
 
     else if(cmd.size() == 2 && cmd[0] == "EXISTS"){
-        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-         cmd[1].c_str());
+        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+        //  cmd.size(),
+        //  cmd[0].c_str(),
+        //  cmd[1].c_str());
         exists(cmd, out);
     }
 
     else if(cmd.size() == 2 && cmd[0] == "DEL"){
-        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-        cmd[1].c_str());
+        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+        //  cmd.size(),
+        //  cmd[0].c_str(),
+        // cmd[1].c_str());
         del(cmd, out);
     }
 
@@ -411,12 +411,12 @@ static Conn* handle_accept(int fd){
 
     uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
     uint32_t port = ntohs(client_addr.sin_port);
-    LOG_INFO("NEW CONNECTION [address: %u.%u.%u.%u:%u]\n",
-        (ip >> 24) & 0xFF,
-        (ip >> 16) & 0xFF,
-        (ip >> 8)  & 0xFF,
-        ip & 0xFF,
-        port);
+    // LOG_INFO("NEW CONNECTION [address: %u.%u.%u.%u:%u]\n",
+    //     (ip >> 24) & 0xFF,
+    //     (ip >> 16) & 0xFF,
+    //     (ip >> 8)  & 0xFF,
+    //     ip & 0xFF,
+    //     port);
 
     fd_set_nb(connfd);
 
@@ -531,7 +531,7 @@ int main(){
 
     fd_set_nb(server_fd);
 
-    LOG_INFO("server running on port %d", PORT);
+    // LOG_INFO("server running on port %d", PORT);
 
     int epoll_fd = epoll_create1(0);
 
