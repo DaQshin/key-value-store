@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string.h>
+
 #define container_of(ptr, T, member) \
     ((T*)((char*)(ptr) - offsetof(T, member)))
 
@@ -11,4 +13,8 @@ inline uint32_t str_hash(const uint8_t* data, size_t len){
     }
 
     return h;
+}
+
+inline size_t min_strlen(const char* a, const char* b){
+    return strcmp(a, b) < 0 ? strlen(a) : strlen(b);
 }

@@ -19,7 +19,7 @@ $(BUILD)/client: src/client.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/server: src/server.cpp src/storage/hashtable.cpp src/storage/avl.cpp
+$(BUILD)/server: src/server.cpp src/storage/hashtable.cpp src/storage/avl.cpp src/storage/zset.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
@@ -28,7 +28,7 @@ $(BUILD)/tests: src/storage/avl.cpp tests/test_avl.cpp
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 run_server: all 
-			./$(BUILD)/server
+			./$(BUILD)/server -p $(PORT)
 
 run_client: all 
 			./$(BUILD)/client $(CMD)

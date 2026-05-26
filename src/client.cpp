@@ -271,6 +271,17 @@ static int32_t read_res(int fd){
 // }
 
 int main(int argc, char** argv){
+
+    int port = PORT;
+
+    for(int i = 0; i < argc; i++){
+        if(!strcmp(argv[i], "-p")){
+            assert(i + 1 < argc);
+            port = std::stoi(argv[i + 1]);
+        }
+    }
+
+
     int fd = socket(AF_INET, SOCK_STREAM, 0);
 
     if(fd < 0){
@@ -279,7 +290,7 @@ int main(int argc, char** argv){
 
     sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
-    client_addr.sin_port = htons(PORT);
+    client_addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
 
     if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){

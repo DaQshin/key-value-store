@@ -127,16 +127,6 @@ AVLNode *avl_del(AVLNode *node) {
     return root;
 }
 
-AVLNode* avl_offset(AVLNode* node, int64_t offset){
-    for(; offset > 0 && node; offset--){
-        node = successor(node);
-    }
-
-    for(; offset < 0 && node; offset++){
-        node = predecessor(node);
-    }
-}
-
 static AVLNode* successor(AVLNode* node){
     if(node->right){
         AVLNode* n = node->right;
@@ -164,4 +154,14 @@ static AVLNode* predecessor(AVLNode* node){
     }
 
     return nullptr;
+}
+
+AVLNode* avl_offset(AVLNode* node, int64_t offset){
+    for(; offset > 0 && node; offset--){
+        node = successor(node);
+    }
+
+    for(; offset < 0 && node; offset++){
+        node = predecessor(node);
+    }
 }

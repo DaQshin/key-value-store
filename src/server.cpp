@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <errno.h>
 #include <fcntl.h>
@@ -13,6 +15,7 @@
 #include <netinet/ip.h>
 #include <vector>
 #include <map>
+#include "zset.h"
 #include "hashtable.h"
 #include "utils.h"
 // #include "log.h"
@@ -92,10 +95,41 @@ static struct {
     HMap db;
 } g_data;
 
+enum {
+    T_INIT = 0,
+    T_STR = 1,
+    T_ZSET = 2,
+};
+
 struct Entry{
     struct HNode node;
     std::string key;
-    std::string value;
+    
+    uint32_t type = 0;
+
+    union {
+        std::string str;
+        ZSet zset;
+    };
+
+    explicit Entry(uint32_t type): type(type){
+        if(type == T_STR){
+            new (&str) std::string;
+        }
+        else if(type == T_ZSET){
+            new (&zset) ZSet;
+        }
+    }
+
+    ~Entry(){
+        if(type == T_STR){
+            str.~basic_string();
+        }
+        else if(type == T_ZSET){
+            zset_clear(&zset);
+        }
+    }
+
 };
 
 static bool entry_eq(HNode* lhs, HNode* rhs){
@@ -158,12 +192,12 @@ static void get(std::vector<std::string>& cmd, Buffer& out){
         out_nil(out);
         return;
     }
-    struct Entry key;
+    struct Entry key{T_STR};
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if(node){
-        val = container_of(node, struct Entry, node)->value;
+        val = container_of(node, struct Entry, node)->str;
     }
     else {
         out_nil(out);
@@ -174,17 +208,17 @@ static void get(std::vector<std::string>& cmd, Buffer& out){
 }
 
 static void set(std::vector<std::string>& cmd, Buffer& out){
-    struct Entry key;
+    struct Entry key{T_STR};
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if(node){
-        container_of(node, struct Entry, node)->value.swap(cmd[2]);
+        container_of(node, struct Entry, node)->str.swap(cmd[2]);
     }
     else{
-       struct Entry* ent = new Entry();
+       struct Entry* ent = new Entry(T_STR);
        ent->key.swap(key.key);
-       ent->value.swap(cmd[2]);
+       ent->str.swap(cmd[2]);
        ent->node.hash = key.node.hash;
        hm_insert(&g_data.db, &ent->node);
     }   
@@ -200,7 +234,7 @@ static void del(std::vector<std::string>& cmd, Buffer& out){
         out_str(out, (const char*)response.data(), response.size());
         return;
     }
-    struct Entry key;
+    struct Entry key{T_STR};
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
@@ -220,7 +254,7 @@ static void flush(Buffer& out){
 }
 
 static void exists(std::vector<std::string>& cmd, Buffer& out){
-    struct Entry key;
+    struct Entry key{T_STR};
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
@@ -505,15 +539,26 @@ static void handle_read(Conn* conn, int epfd){
 
 }
 
-int main(){
+int main(int argc, char* argv[]){
+
+    int port = PORT;
+
+    for(int i = 1; i < argc; i++){
+        if(!strcmp(argv[i], "-p")){
+            assert(i + 1 < argc);
+            port = std::stoi(argv[i + 1]);
+            break;
+        }
+    }
+
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(server_fd < 0){
         die("socket()");
     }
 
-    sockaddr_in server_addr;
+    sockaddr_in server_addr{};
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
+    server_addr.sin_port = htons(port);
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
     int val = 1;
@@ -531,7 +576,7 @@ int main(){
 
     fd_set_nb(server_fd);
 
-    // LOG_INFO("server running on port %d", PORT);
+    printf("server running on port %d\n", port);
 
     int epoll_fd = epoll_create1(0);
 
