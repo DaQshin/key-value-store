@@ -126,3 +126,42 @@ AVLNode *avl_del(AVLNode *node) {
     *from = victim;
     return root;
 }
+
+AVLNode* avl_offset(AVLNode* node, int64_t offset){
+    for(; offset > 0 && node; offset--){
+        node = successor(node);
+    }
+
+    for(; offset < 0 && node; offset++){
+        node = predecessor(node);
+    }
+}
+
+static AVLNode* successor(AVLNode* node){
+    if(node->right){
+        AVLNode* n = node->right;
+        while(n->left) n = n->left;
+        return n;
+    }
+
+    while(AVLNode* parent = node->parent){
+        if(node == parent->left) return node;
+        node = parent;
+    }
+
+    return nullptr;
+}
+
+static AVLNode* predecessor(AVLNode* node){
+    if(node->left){
+        AVLNode* n = node->left;
+        while(n->right) n = n->right;
+    }
+
+    while(AVLNode* parent = node->parent){
+        if(node == parent->right) return node;
+        node = parent;
+    }
+
+    return nullptr;
+}

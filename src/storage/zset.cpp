@@ -29,6 +29,15 @@ static bool zless(AVLNode* lhs, AVLNode* rhs){
     return rv != 0 ? (rv < 0) : (zl->len < zr->len);
 }
 
+static bool zless(AVLNode* node, double score, const char* name, size_t len){
+    ZNode* zn = container_of(node, ZNode, AVLNode);
+    if(zn->score != score) return zn->score < score;
+
+    int rv = memcmp(zn->name, name, min(zn->name, name));
+    return rv != 0 ? (rv < 0) : (zn->len < len);
+
+}
+
 static void tree_insert(ZSet* zset, ZNode* node){
     AVLNode* parent = nullptr;
     AVLNode** from = &zset->tree;
@@ -86,4 +95,17 @@ static void zset_delete(ZSet* zset, ZNode* node){
     znode_del(node);
 }   
 
+ZNode* zset_seekge(ZSet* zset, double score, const char* name, size_t len){
+    AVLNode* found = nullptr;
+    for(AVLNode* node = zset->tree; node;){
+        if(zless(node, score, name, len)){
+            node = node->right;
+            continue;
+        }
+        
+        found = node;
+        node = node->left;
+    }
 
+    return found ? container_of(found, ZNode, root) : nullptr;
+}
