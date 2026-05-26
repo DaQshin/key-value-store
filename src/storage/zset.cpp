@@ -84,14 +84,16 @@ static void zset_update(ZSet* zset, ZNode* node, double score){
     tree_insert(zset, node);
 }
 
-void zset_insert(ZSet* zset, const char* name, size_t len, double score){
+bool zset_insert(ZSet* zset, const char* name, size_t len, double score){
     if(ZNode* node = zset_lookup(zset, name, len)) {
         zset_update(zset, node, score);
+        return false;
     }
 
     ZNode* node = znode_new(name, len, score);
     hm_insert(&zset->hmap, &node->hnode);
     tree_insert(zset, node);
+    return true;
 }
 
 void zset_delete(ZSet* zset, ZNode* node){

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
@@ -71,7 +72,9 @@ struct Conn {
 
 enum {
     ERR_UNKNOWN = 1,
-    ERR_TOO_BIG = 2
+    ERR_TOO_BIG = 2,
+    ERR_BAD_ARG = 3,
+    ERR_BAD_TYP = 4
 };
 
 enum {
@@ -111,6 +114,8 @@ struct Entry{
         std::string str;
         ZSet zset;
     };
+
+    explicit Entry(){}
 
     explicit Entry(uint32_t type): type(type){
         if(type == T_STR){
@@ -263,6 +268,85 @@ static void exists(std::vector<std::string>& cmd, Buffer& out){
     out_int(out, (int64_t)exists);
 }
 
+static bool str2dbl(const std::string& str, double& out){
+    char* end = nullptr;
+    out = strtod(str.c_str(), &end);
+    return end == str.c_str() + str.size() && !isnan(out);
+}
+
+static bool str2int(const std::string& str, int64_t& out){
+    char* end = nullptr;
+    out = strtoll(str.c_str(), &end, 10);
+    return end == str.c_str() + str.size() && !isnan(out);
+}
+
+static void zadd(std::vector<std::string>& cmd, Buffer& out){
+    double score = 0;
+    if(!str2dbl(cmd[2], score)){
+        return out_err(out, ERR_BAD_ARG, "arg: expect float");
+    }
+
+    struct Entry lookup_key;
+    lookup_key.key.swap(cmd[1]);
+    lookup_key.node.hash = str_hash((const uint8_t*)lookup_key.key.data(), lookup_key.key.size());
+    HNode* found = hm_lookup(&g_data.db, &lookup_key.node, &entry_eq);
+
+    struct Entry key;
+
+    if(!found){
+        key.type = T_ZSET;
+        key.key.swap(lookup_key.key);
+        key.node.hash = lookup_key.node.hash;
+    }
+    else {
+        struct Entry* ent = container_of(found, struct Entry, node);
+        if(ent->type != T_ZSET) return out_err(out, ERR_BAD_ARG, "type: expect zset");
+        else return;
+    }
+
+    const std::string& name = cmd[3];
+    bool added = zset_insert(&key.zset, name.data(), name.size(), score);
+    out_int(out, (int64_t)added);
+}
+
+static ZSet* get_zset(std::string key){
+    struct Entry lookup_key;
+    lookup_key.key = key;
+    lookup_key.node.hash = str_hash((const uint8_t*)lookup_key.key.data(), lookup_key.key.size());
+    HNode* found = hm_lookup(&g_data.db, &lookup_key.node, &entry_eq);
+    if(!found) return nullptr;
+
+    struct Entry* ent = container_of(found, struct Entry, node);
+    return ent->type ? &ent->zset : nullptr;
+}
+
+static void zrem(std::vector<std::string>& cmd, Buffer& out){
+    ZSet* zset = get_zset(cmd[1]);
+    if(!zset){
+        return out_err(out, ERR_BAD_ARG, "arg: expect zset");
+    }
+
+    const std::string& name = cmd[2];
+    ZNode* znode = zset_lookup(zset, name.data(), name.size());
+    if(znode){
+        zset_delete(zset, znode);
+    }
+
+    return out_int(out, znode ? 1 : 0);
+}
+
+static void zscore(std::vector<std::string>& cmd, Buffer& out){
+    ZSet* zset = get_zset(cmd[1]);
+    if(!zset){
+        return out_err(out, ERR_BAD_ARG, "arg: expect zset");
+    }
+
+    const std::string& name = cmd[2];
+    ZNode* znode = zset_lookup(zset, name.data(), name.size());
+
+    return znode ? out_dbl(out, znode->score) : out_nil(out);
+}
+
 static void do_request(std::vector<std::string>& cmd, Buffer& out){
 
     // LOG_INFO("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
@@ -307,6 +391,18 @@ static void do_request(std::vector<std::string>& cmd, Buffer& out){
         flush(out);
     }
 
+    else if(cmd.size() == 4 && cmd[0] == "ZADD"){
+        zadd(cmd, out);
+    }
+
+    else if(cmd.size() == 3 && cmd[0] == "ZREM"){
+        zrem(cmd, out);
+    }
+
+    else if(cmd.size() == 3 && cmd[0] == "ZSCORE"){
+        zscore(cmd, out);
+    }
+    
     else{
         out_err(out, ERR_UNKNOWN, "Unknown Command.");
     }
