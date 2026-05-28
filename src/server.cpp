@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <time.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -16,6 +17,7 @@
 #include <netinet/ip.h>
 #include <vector>
 #include <map>
+#include "list.h"
 #include "zset.h"
 #include "hashtable.h"
 #include "utils.h"
@@ -68,6 +70,9 @@ struct Conn {
 
     Buffer incoming;
     Buffer outgoing;
+
+    uint64_t last_active_ms = 0;
+    List idle_node;
 };
 
 enum {
@@ -96,6 +101,11 @@ static void buf_consume(Buffer &buf, size_t n){
 
 static struct {
     HMap db;
+
+    std::vector<Conn*> fd2conn;
+
+    List idle_list;
+
 } g_data;
 
 enum {
@@ -553,6 +563,8 @@ static Conn* handle_accept(int fd){
     Conn* conn = new Conn();
     conn->fd = connfd;
     conn->want_read = true;
+    conn->last_active_ms = get_time_msec();
+    list_insert(&g_data.idle_list, &conn->idle_node);
     return conn;
 
 }
@@ -635,6 +647,25 @@ static void handle_read(Conn* conn, int epfd){
 
 }
 
+const uint64_t k_idle_timeout_ms = 5000;
+
+static uint64_t get_time_msec(){
+    struct time_spec ts{0, 0};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return uint64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000 / 1000;
+}
+
+static int32_t next_timer_ms(){
+    if(list_empty(&g_data.idle_list)) return -1;
+
+    uint64_t now_ms = get_time_msec();
+    Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
+    uint64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
+    if(next_ms <= now_ms) return 0;
+    return (int32_t)(next_ms - now_ms);
+}
+
+
 int main(int argc, char* argv[]){
 
     int port = PORT;
@@ -699,6 +730,7 @@ int main(int argc, char* argv[]){
 
         for(int i = 0; i < n; i++){
             int fd = events[i].data.fd;
+
             if(fd == server_fd){
                 Conn* conn;
                 if(!(conn = handle_accept(fd))){
@@ -713,12 +745,19 @@ int main(int argc, char* argv[]){
                     fd2conn.resize(conn->fd + 1);
                 }
                 fd2conn[conn->fd] = conn;
+
                 if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->fd, &cev) < 0){
                     msg("epoll_ctl()");
                     continue;
                 }
             }
             else{
+
+                Conn* conn = g_data.fd2conn[fd];
+                conn->last_active_ms = get_time_msec();
+                list_detach(&conn->idle_node);
+                list_insert(&g_data.idle_list, &conn->idle_node);
+
                 int e = events[i].events;
 
                 if(e & EPOLLIN){
