@@ -37,7 +37,7 @@ static void msg_errno(const char* msg){
 
 static void die(const char* msg){
     int err = errno;
-    fprintf(stderr, "[%d] %s\n", err, msg);
+    LOG_ERROR("%s (errno=%d: %s)", msg, errno, strerror(errno));
     abort();
 }
 
@@ -494,14 +494,14 @@ static size_t resp_size(Buffer& out, size_t header){
 static void resp_header_assign(Buffer& out, size_t header){
     size_t msg_size = resp_size(out, header);
     if(msg_size > k_max_msg){
-        printf("Response is too big.");
+        LOG_WARN("Response length exceeded k_max_msg");
         out.resize(header + 4);
         out_err(out, ERR_TOO_BIG, "Response is too big.");
         msg_size = resp_size(out, header);
     }
 
     uint32_t len = (uint32_t)msg_size;
-    printf("msg_size = [%d]\n", len);
+    LOG_DEBUG("msg_size = [%d]\n", len);
     memcpy(&out[header], &len, 4);
 }
 
@@ -719,7 +719,7 @@ int main(int argc, char* argv[]){
 
     fd_set_nb(server_fd);
 
-    printf("server running on port %d\n", port);
+    LOG_INFO("server running on port %d\n", port);
 
     int epoll_fd = epoll_create1(0);
 
@@ -801,6 +801,5 @@ int main(int argc, char* argv[]){
         }
 
         process_timers();
-        
     }
 }
