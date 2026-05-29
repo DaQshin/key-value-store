@@ -1,25 +1,33 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
 MODE ?= debug
-
+PORT ?= 5000
 BUILD := build
 
-ifneq ($(MODE), debug)
-	CXXFLAGS += -O2
+CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
+
+SERVER_SRCS = src/server.cpp \
+				src/storage/hashtable.cpp \
+				src/storage/avl.cpp \
+				src/storage/zset.cpp
+
+COMMON_SRCS = src/logs/log.cpp
+
+ifeq ($(MODE), debug)
+    CXXFLAGS += -g -O0 -DLOG_LEVEL=0
 else
-	CXXFLAGS += -g -O0
+    CXXFLAGS += -O2 -DLOG_LEVEL=1
 endif
 
-.PHONY: all clean run
+.PHONY: all clean run_server run_client tests
 
 all: $(BUILD)/client $(BUILD)/server
 tests: $(BUILD)/tests
 
-$(BUILD)/client: src/client.cpp
+$(BUILD)/client: src/client.cpp $(COMMON_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/server: src/server.cpp src/storage/hashtable.cpp src/storage/avl.cpp src/storage/zset.cpp
+$(BUILD)/server: $(SERVER_SRCS) $(COMMON_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 

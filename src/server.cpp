@@ -21,7 +21,7 @@
 #include "zset.h"
 #include "hashtable.h"
 #include "utils.h"
-// #include "log.h"
+#include "logs/log.h" 
 
 #define PORT 5000
 #define MAX_EVENTS 64
@@ -57,23 +57,16 @@ static void fd_set_nb(int fd){
     }
 }
 
+static uint64_t get_time_msec(){
+    struct timespec ts = {0, 0};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return uint64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000 / 1000;
+}
+
+
 const size_t k_max_msg = 32 << 20;
 
 typedef std::vector<uint8_t> Buffer;
-
-
-struct Conn {
-    int fd = -1;
-    bool want_read = false;
-    bool want_write = false;
-    bool want_close = false;
-
-    Buffer incoming;
-    Buffer outgoing;
-
-    uint64_t last_active_ms = 0;
-    List idle_node;
-};
 
 enum {
     ERR_UNKNOWN = 1,
@@ -99,12 +92,26 @@ static void buf_consume(Buffer &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n); 
 }
 
+struct Conn {
+    int fd = -1;
+    bool want_read = false;
+    bool want_write = false;
+    bool want_close = false;
+
+    Buffer incoming;
+    Buffer outgoing;
+
+    uint64_t last_active_ms = 0;
+    DList idle_node;
+};
+
+
 static struct {
     HMap db;
 
     std::vector<Conn*> fd2conn;
 
-    List idle_list;
+    DList idle_list;
 
 } g_data;
 
@@ -144,7 +151,6 @@ struct Entry{
             zset_clear(&zset);
         }
     }
-
 };
 
 static bool entry_eq(HNode* lhs, HNode* rhs){
@@ -254,6 +260,7 @@ static void del(std::vector<std::string>& cmd, Buffer& out){
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if(node){
+        hm_delete(&g_data.db, node, &entry_eq);
         delete container_of(node, struct Entry, node);
     }
     else response = "Value Not Found.";
@@ -311,7 +318,6 @@ static void zadd(std::vector<std::string>& cmd, Buffer& out){
     else {
         struct Entry* ent = container_of(found, struct Entry, node);
         if(ent->type != T_ZSET) return out_err(out, ERR_BAD_ARG, "type: expect zset");
-        else return;
     }
 
     const std::string& name = cmd[3];
@@ -359,41 +365,41 @@ static void zscore(std::vector<std::string>& cmd, Buffer& out){
 
 static void do_request(std::vector<std::string>& cmd, Buffer& out){
 
-    // LOG_INFO("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
-    //      (void*)g_data.db.newer.table,
-    //      g_data.db.newer.mask,
-    //      g_data.db.newer.size);
+    LOG_DEBUG("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
+         (void*)g_data.db.newer.table,
+         g_data.db.newer.mask,
+         g_data.db.newer.size);
     
     if(cmd.size() == 2 && cmd[0] == "GET"){
-        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-        //  cmd.size(),
-        //  cmd[0].c_str(),
-        //  cmd[1].c_str());
+        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+         cmd[1].c_str());
         get(cmd, out);
     }
 
     else if(cmd.size() == 3 && cmd[0] == "SET"){
-        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s cmd[2]=%s",
-        //  cmd.size(),
-        //  cmd[0].c_str(),
-        //  cmd[1].c_str(),
-        // cmd[2].c_str());
+        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s cmd[2]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+         cmd[1].c_str(),
+        cmd[2].c_str());
         set(cmd, out);
     }
 
     else if(cmd.size() == 2 && cmd[0] == "EXISTS"){
-        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-        //  cmd.size(),
-        //  cmd[0].c_str(),
-        //  cmd[1].c_str());
+        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+         cmd[1].c_str());
         exists(cmd, out);
     }
 
     else if(cmd.size() == 2 && cmd[0] == "DEL"){
-        // LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-        //  cmd.size(),
-        //  cmd[0].c_str(),
-        // cmd[1].c_str());
+        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+        cmd[1].c_str());
         del(cmd, out);
     }
 
@@ -416,7 +422,6 @@ static void do_request(std::vector<std::string>& cmd, Buffer& out){
     else{
         out_err(out, ERR_UNKNOWN, "Unknown Command.");
     }
-
 }
 
 /*
@@ -551,12 +556,12 @@ static Conn* handle_accept(int fd){
 
     uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
     uint32_t port = ntohs(client_addr.sin_port);
-    // LOG_INFO("NEW CONNECTION [address: %u.%u.%u.%u:%u]\n",
-    //     (ip >> 24) & 0xFF,
-    //     (ip >> 16) & 0xFF,
-    //     (ip >> 8)  & 0xFF,
-    //     ip & 0xFF,
-    //     port);
+    LOG_INFO("NEW CONNECTION [address: %u.%u.%u.%u:%u]\n",
+        (ip >> 24) & 0xFF,
+        (ip >> 16) & 0xFF,
+        (ip >> 8)  & 0xFF,
+        ip & 0xFF,
+        port);
 
     fd_set_nb(connfd);
 
@@ -564,7 +569,7 @@ static Conn* handle_accept(int fd){
     conn->fd = connfd;
     conn->want_read = true;
     conn->last_active_ms = get_time_msec();
-    list_insert(&g_data.idle_list, &conn->idle_node);
+    dlist_insert_before(&g_data.idle_list, &conn->idle_node);
     return conn;
 
 }
@@ -638,31 +643,42 @@ static void handle_read(Conn* conn, int epfd){
             conn->want_close = true;
             return;
         }
-
     }
 
     if(conn->outgoing.size() > 0){
             set_write(epfd, conn);
     }
+}
 
+static void destroy(Conn* conn){
+    close(conn->fd);
+    g_data.fd2conn[conn->fd] = nullptr;
+    dlist_detach(&conn->idle_node);
+    delete conn;
 }
 
 const uint64_t k_idle_timeout_ms = 5000;
 
-static uint64_t get_time_msec(){
-    struct time_spec ts{0, 0};
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return uint64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000 / 1000;
-}
-
 static int32_t next_timer_ms(){
-    if(list_empty(&g_data.idle_list)) return -1;
+    if(dlist_empty(&g_data.idle_list)) return -1;
 
     uint64_t now_ms = get_time_msec();
     Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
     uint64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
     if(next_ms <= now_ms) return 0;
     return (int32_t)(next_ms - now_ms);
+}
+
+static void process_timers(){
+    int64_t now_ms = get_time_msec();
+    while(!dlist_empty(&g_data.idle_list)){
+        Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
+        int64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
+        if(next_ms >= now_ms) break;
+
+        fprintf(stderr, "removing idle connection: %d\n", conn->fd);
+        destroy(conn);
+    }
 }
 
 
@@ -720,11 +736,15 @@ int main(int argc, char* argv[]){
     }
 
     epoll_event events[MAX_EVENTS];
-    std::vector<Conn*> fd2conn;
+    dlist_init(&g_data.idle_list);
 
     while(true){
-        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+
+        int32_t timeout_ms = next_timer_ms();
+
+        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, timeout_ms);
         if(n < 0){
+            if(errno == EINTR) continue;
             die("epoll_wait()");
         }
 
@@ -741,10 +761,10 @@ int main(int argc, char* argv[]){
                 epoll_event cev{};
                 cev.events = EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP;
                 cev.data.fd = conn->fd;
-                if(fd2conn.size() <= (size_t)conn->fd){
-                    fd2conn.resize(conn->fd + 1);
+                if(g_data.fd2conn.size() <= (size_t)conn->fd){
+                    g_data.fd2conn.resize(conn->fd + 1);
                 }
-                fd2conn[conn->fd] = conn;
+                g_data.fd2conn[conn->fd] = conn;
 
                 if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->fd, &cev) < 0){
                     msg("epoll_ctl()");
@@ -754,29 +774,33 @@ int main(int argc, char* argv[]){
             else{
 
                 Conn* conn = g_data.fd2conn[fd];
+
+                if(!conn) continue;
+
                 conn->last_active_ms = get_time_msec();
-                list_detach(&conn->idle_node);
-                list_insert(&g_data.idle_list, &conn->idle_node);
+                dlist_detach(&conn->idle_node);
+                dlist_insert_before(&g_data.idle_list, &conn->idle_node);
 
                 int e = events[i].events;
 
                 if(e & EPOLLIN){
-                    handle_read(fd2conn[fd], epoll_fd);
+                    handle_read(conn, epoll_fd);
                 }
 
                 if(e & EPOLLOUT){
-                    handle_write(fd2conn[fd], epoll_fd);
+                    handle_write(conn, epoll_fd);
                 }
 
-                if((e & (EPOLLERR | EPOLLHUP)) || fd2conn[fd]->want_close){
-                    Conn* conn = fd2conn[fd];
-                    if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0) die("epoll_ctl");
-                    close(conn->fd);
-                    fd2conn[fd] = nullptr;
-                    delete conn;
+                if((e & (EPOLLERR | EPOLLHUP)) || conn->want_close){
+                    if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0) 
+                        die("epoll_ctl");
+
+                    destroy(conn);
                 }
             }
         }
+
+        process_timers();
         
     }
 }

@@ -6,5 +6,5 @@
 a.out
 *.exe 
 
+# build files
 build/
-logging/
