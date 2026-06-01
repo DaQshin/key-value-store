@@ -1,6 +1,5 @@
 CXX := g++
 MODE ?= debug
-PORT ?= 5000
 BUILD := build
 
 CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
@@ -13,9 +12,9 @@ SERVER_SRCS = src/server.cpp \
 COMMON_SRCS = src/logs/log.cpp
 
 ifeq ($(MODE), debug)
-    CXXFLAGS += -g -O0 -DLOG_LEVEL=0
+    CXXFLAGS += -g -O0 -DLOG_LEVEL=1
 else
-    CXXFLAGS += -O2 -DLOG_LEVEL=1
+    CXXFLAGS += -O2 -DLOG_LEVEL=0
 endif
 
 .PHONY: all clean run_server run_client tests
@@ -36,7 +35,7 @@ $(BUILD)/tests: src/storage/avl.cpp tests/test_avl.cpp
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 run_server: all 
-			./$(BUILD)/server -p $(PORT)
+			./$(BUILD)/server 
 
 run_client: all 
 			./$(BUILD)/client $(CMD)

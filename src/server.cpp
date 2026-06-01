@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <time.h>
+#include <limits.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -57,7 +58,7 @@ static void fd_set_nb(int fd){
     }
 }
 
-static uint64_t get_time_msec(){
+static uint64_t get_monotonic_msec(){
     struct timespec ts = {0, 0};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return uint64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000 / 1000;
@@ -102,16 +103,20 @@ struct Conn {
     Buffer outgoing;
 
     uint64_t last_active_ms = 0;
+    uint64_t io_start_ms = 0;
     DList idle_node;
+    DList io_node;
 };
 
 
 static struct {
     HMap db;
 
+    int epoll_fd;
     std::vector<Conn*> fd2conn;
 
     DList idle_list;
+    DList io_list;
 
 } g_data;
 
@@ -568,19 +573,19 @@ static Conn* handle_accept(int fd){
     Conn* conn = new Conn();
     conn->fd = connfd;
     conn->want_read = true;
-    conn->last_active_ms = get_time_msec();
+    conn->last_active_ms = get_monotonic_msec();
     dlist_insert_before(&g_data.idle_list, &conn->idle_node);
     return conn;
 
 }
 
-static void set_write(int epfd, Conn* conn){
+static void set_write(Conn* conn){
     if(!conn->want_write && conn->outgoing.size() > 0){
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
         ev.data.fd = conn->fd;
 
-        if(epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
+        if(epoll_ctl(g_data.epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
             die("epoll_ctl MOD");
         }
 
@@ -592,7 +597,7 @@ static void set_write(int epfd, Conn* conn){
         ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
         ev.data.fd = conn->fd;
 
-        if(epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
+        if(epoll_ctl(g_data.epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
             die("epoll_ctl MOD");
         }
 
@@ -601,7 +606,7 @@ static void set_write(int epfd, Conn* conn){
     }
 }
 
-static void handle_write(Conn* conn, int epfd){
+static void handle_write(Conn* conn){
     assert(conn->outgoing.size() > 0);
     
     while(conn->outgoing.size() > 0){
@@ -616,12 +621,27 @@ static void handle_write(Conn* conn, int epfd){
         }
 
     }
-    set_write(epfd, conn);
+
+    if(conn->outgoing.size() == 0){
+        dlist_detach(&conn->io_node);
+        conn->last_active_ms = get_monotonic_msec();
+        dlist_detach(&conn->io_node);
+        dlist_insert_before(&g_data.io_list, &conn->io_node);
+    }
+
+    set_write(conn);
 
 }
 
-static void handle_read(Conn* conn, int epfd){
+static void handle_read(Conn* conn){
     uint8_t buf[64 * 1024];
+
+    if(conn->incoming.size() == 0){
+        conn->io_start_ms = get_monotonic_msec();
+        dlist_init(&conn->io_node);
+        dlist_insert_before(&g_data.io_list, &conn->io_node);
+    }
+
     while(true){
         ssize_t rv = read(conn->fd, buf, sizeof(buf));
 
@@ -646,53 +666,69 @@ static void handle_read(Conn* conn, int epfd){
     }
 
     if(conn->outgoing.size() > 0){
-            set_write(epfd, conn);
+            set_write(conn);
     }
 }
 
 static void destroy(Conn* conn){
+    if(epoll_ctl(g_data.epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0) 
+        die("epoll_ctl");
     close(conn->fd);
     g_data.fd2conn[conn->fd] = nullptr;
     dlist_detach(&conn->idle_node);
+    dlist_detach(&conn->io_node);
     delete conn;
 }
 
-const uint64_t k_idle_timeout_ms = 5000;
+const uint64_t k_idle_timeout_ms = 10 * 1000;
+const uint64_t k_io_timeout_ms = 5 * 1000;
 
-static int32_t next_timer_ms(){
-    if(dlist_empty(&g_data.idle_list)) return -1;
+static int64_t next_timer_ms(){
+    int64_t now_ms = get_monotonic_msec();
 
-    uint64_t now_ms = get_time_msec();
-    Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
-    uint64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
+    int64_t next_ms = INT64_MAX;
+    int64_t next_idle_ms = INT64_MAX;
+    int64_t next_io_ms = INT64_MAX;
+
+    if(!dlist_empty(&g_data.idle_list)){
+        Conn* conn = container_of(&g_data.idle_list.next, Conn, idle_node);
+        next_idle_ms = conn->last_active_ms + k_idle_timeout_ms;
+    }
+
+    if(!dlist_empty(&g_data.io_list)){
+        Conn* conn = container_of(&g_data.io_list.next, Conn, io_node);
+        next_io_ms = conn->io_start_ms + k_io_timeout_ms;
+    }
+
+    next_ms = std::min(next_idle_ms, next_io_ms);
     if(next_ms <= now_ms) return 0;
-    return (int32_t)(next_ms - now_ms);
+    return (next_ms - now_ms);
 }
 
 static void process_timers(){
-    int64_t now_ms = get_time_msec();
+    int64_t now_ms = get_monotonic_msec();
     while(!dlist_empty(&g_data.idle_list)){
-        Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
+        Conn* conn = container_of(&g_data.idle_list.next, Conn, idle_node);
         int64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
         if(next_ms >= now_ms) break;
 
-        fprintf(stderr, "removing idle connection: %d\n", conn->fd);
+        fprintf(stderr, "removing idle connection[connection timeout]: %d\n", conn->fd);
+        destroy(conn);
+    }
+
+    while(!dlist_empty(&g_data.io_list)){
+        Conn* conn = container_of(&g_data.io_list.next, Conn, io_node);
+        printf("%ld", conn->io_start_ms);
+        int64_t end_ms = conn->io_start_ms + k_io_timeout_ms;
+        if(end_ms >= now_ms) break;
+
+        fprintf(stderr, "removing idle connection[io timeout]: %d\n", conn->fd);
         destroy(conn);
     }
 }
 
 
-int main(int argc, char* argv[]){
-
-    int port = PORT;
-
-    for(int i = 1; i < argc; i++){
-        if(!strcmp(argv[i], "-p")){
-            assert(i + 1 < argc);
-            port = std::stoi(argv[i + 1]);
-            break;
-        }
-    }
+int main(){
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if(server_fd < 0){
@@ -701,7 +737,7 @@ int main(int argc, char* argv[]){
 
     sockaddr_in server_addr{};
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
     int val = 1;
@@ -719,7 +755,7 @@ int main(int argc, char* argv[]){
 
     fd_set_nb(server_fd);
 
-    LOG_INFO("server running on port %d\n", port);
+    LOG_INFO("server running on port %d\n", PORT);
 
     int epoll_fd = epoll_create1(0);
 
@@ -727,6 +763,7 @@ int main(int argc, char* argv[]){
         die("epoll_create1()");
     }
 
+    g_data.epoll_fd = epoll_fd;
     epoll_event sev{};
     sev.events = EPOLLIN | EPOLLERR;
     sev.data.fd = server_fd;
@@ -737,6 +774,7 @@ int main(int argc, char* argv[]){
 
     epoll_event events[MAX_EVENTS];
     dlist_init(&g_data.idle_list);
+    dlist_init(&g_data.io_list);
 
     while(true){
 
@@ -777,23 +815,21 @@ int main(int argc, char* argv[]){
 
                 if(!conn) continue;
 
-                conn->last_active_ms = get_time_msec();
+                conn->last_active_ms = get_monotonic_msec();
                 dlist_detach(&conn->idle_node);
                 dlist_insert_before(&g_data.idle_list, &conn->idle_node);
 
                 int e = events[i].events;
 
                 if(e & EPOLLIN){
-                    handle_read(conn, epoll_fd);
+                    handle_read(conn);
                 }
 
                 if(e & EPOLLOUT){
-                    handle_write(conn, epoll_fd);
+                    handle_write(conn);
                 }
 
                 if((e & (EPOLLERR | EPOLLHUP)) || conn->want_close){
-                    if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0) 
-                        die("epoll_ctl");
 
                     destroy(conn);
                 }
