@@ -1,6 +1,7 @@
 CXX := g++
 MODE ?= debug
 BUILD := build
+HOST ?= 127.0.0.1
 
 CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
 TESTFLAGS := -lgtest -lgtest_main -lpthread
@@ -13,10 +14,10 @@ SERVER_SRCS = src/server.cpp \
 COMMON_SRCS = src/logs/log.cpp
 
 ifeq ($(MODE), debug)
-    CXXFLAGS += -g -O0 -DLOG_LEVEL=1
+    CXXFLAGS += -g -O0 -DLOG_LEVEL=0
 
 else ifeq ($(MODE), release)
-	CXXFLAGS += -O2 -DNDEBUG -DLOG_LEVEL=0
+	CXXFLAGS += -O2 -DNDEBUG -DLOG_LEVEL=2
 
 else
     $(error Unknown MODE '$(MODE)'. Use MODE=debug or MODE=release)
@@ -36,7 +37,7 @@ $(BUILD)/server: $(SERVER_SRCS) $(COMMON_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/tests: tests/unit/test_avl.cpp src/storage/avl.cpp
+$(BUILD)/tests: tests/unit/test_heap.cpp src/storage/heap.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) -o $@
 
@@ -47,7 +48,7 @@ run_server: all
 			./$(BUILD)/server 
 
 run_client: all 
-			./$(BUILD)/client $(CMD)
+			./$(BUILD)/client --host $(HOST) 
 
 clean:
 	rm -rf $(BUILD)
