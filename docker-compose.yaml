@@ -1,7 +1,7 @@
 services:
   server:
     build:
-      context: .
+      context: ./
       dockerfile: Dockerfile
       target: server
     ports:
@@ -10,10 +10,10 @@ services:
 
   client:
     build:
-      context: .
+      context: ./
       dockerfile: Dockerfile
       target: client
-    command: ["./build/client"]
+    command: ["./build/client", "--host", "server"]
     depends_on:
       - server
     stdin_open: true
