@@ -1,10 +1,13 @@
 #include <iostream>
+#include <sstream>
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <poll.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/ip.h>
+#include <netdb.h>
 #include <string.h>
 #include <assert.h>
 #include <vector>
@@ -226,113 +229,129 @@ static int32_t read_res(int fd){
     }
 
     return rv;
-
 }
 
-// static int32_t read_res(int fd){
-//     uint8_t rbuf[4 + k_max_msg];
-//     errno = 0;
-//     int32_t err = read_full(fd, rbuf, 4);
-//     if(err){
-//         if(errno == 0){
-//             msg("EOF");
-//         }
-//         else msg("read()");
-//         return err;
-//     }
+int32_t parse_cmd(std::vector<std::string>& cmd, const std::string& line){
+    std::istringstream stream(line);
+    std::string token;
 
-//     uint32_t len = 0;
-//     memcpy(&len, rbuf, 4);
-//     if(len > k_max_msg){
-//         msg("too long");
-//         return -1;
-//     }
+    stream >> token;
 
-//     err = read_full(fd, &rbuf[4], 4);
-//     if(err){
-//         msg("read()");
-//         return -1;
-//     }
+    if( 
+        token != "PING" && 
+        token != "GET" && 
+        token != "SET" && 
+        token != "DEL" && 
+        token != "FLUSH" && 
+        token != "EXISTS" && 
+        token != "ZADD" && 
+        token != "ZREM" &&
+        token != "ZSCORE") return -1;
 
-//     uint32_t status_code = 0;
-//     if(len < 4){
-//         msg("bad response");
-//         return -1;
-//     }
-//     memcpy(&status_code, &rbuf[4], 4);
+    cmd.push_back(token);
 
-//     err = read_full(fd, &rbuf[8], len - 4);
-//     if(err){
-//         msg("read()");
-//         return -1;
-//     }
+    while(stream >> token){
+        cmd.push_back(token);
+    }
 
-//     LOG_INFO("server says: [%u]  %.*s\n", status_code, len - 4, &rbuf[8]);
-//     return 0;
-// }
+    return 0;
+}
 
 int main(int argc, char** argv){
-
-    int port = PORT;
-
-    for(int i = 0; i < argc; i++){
-        if(!strcmp(argv[i], "-p")){
-            assert(i + 1 < argc);
-            port = std::stoi(argv[i + 1]);
+    const char* host = "127.0.0.1";
+    for(int i = 1; i < argc; i++){
+        if(std::string(argv[i]) == "--host"){
+            if(i + 1 < argc) host = argv[i + 1];
+            else die("hostname not provided");
         }
     }
 
+    int client_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-
-    if(fd < 0){
+    if(client_fd < 0){
         die("socket()");
     }
 
-    sockaddr_in client_addr;
-    client_addr.sin_family = AF_INET;
-    client_addr.sin_port = htons(port);
-    inet_pton(AF_INET, "127.0.0.1", &client_addr.sin_addr);
+    struct addrinfo addr{};
+    addr.ai_family = AF_INET;
+    addr.ai_socktype = SOCK_STREAM;
 
-    if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
+    struct addrinfo* res = nullptr;
+
+    if(getaddrinfo(host, "5000", &addr, &res) < 0){
+        die("getaddrinfo()");
+    }
+
+    if(connect(client_fd, res->ai_addr, res->ai_addrlen) < 0){
+        freeaddrinfo(res);
+        close(client_fd);
         die("connect()");
     }
 
-    std::vector<std::string> commands;
-    for(int i = 1; i < argc; i++){
-        if(std::string(argv[i]) == "GET"){
-            commands.push_back("GET");
-            commands.push_back(argv[++i]);
+    struct pollfd poll_args[2];
+    poll_args[0].fd = STDIN_FILENO;
+    poll_args[0].events = POLLIN;
+    poll_args[1].fd = client_fd;
+    poll_args[1].events = POLLIN | POLLRDHUP;
+
+    bool waiting_for_response = false;
+
+    while(true){
+
+        if(!waiting_for_response) std::cout << "cacheline> " << std::flush;
+
+        int n = poll(poll_args, 2, -1);
+
+        if(n < 0){
+            if(errno == EINTR) continue;
+            die("poll()");
         }
-        else if(std::string(argv[i]) == "SET"){
-            commands.push_back("SET");
-            commands.push_back(argv[++i]);
-            if(i + 1 >= argc){
-                msg("Not Enough Values.");
-                exit(1);
+
+        int stdin_ready = poll_args[0].revents;
+        int conn_ready = poll_args[1].revents;
+
+        if(stdin_ready & POLLIN){
+            std::string line;
+
+            if(!std::getline(std::cin, line)) break;
+
+            std::vector<std::string> commands;
+
+            if(parse_cmd(commands, line) < 0){
+                std::cout << "Invalid Command" << std::endl; 
+                continue;
             }
-            commands.push_back(argv[++i]);
+
+            if(commands.size() == 1 && commands[0] == "exit()"){
+                goto CLEAN;
+            }
+
+            if(commands.size() == 0) continue;
+            
+            if(send_req(client_fd, commands) < 0) {
+                LOG_ERROR("Connection Failed");
+                goto CLEAN;
+            }
+            waiting_for_response = true;
+
         }
-        else if(std::string(argv[i]) == "DEL"){
-            commands.push_back("DEL");
-            commands.push_back(argv[++i]);
+
+        if(conn_ready & POLLIN && waiting_for_response){
+            if(read_res(client_fd) < 0){
+                LOG_ERROR("Connection Terminated.");
+                continue;
+            }
+            waiting_for_response = false;
         }
-        else if(std::string(argv[i]) == "FLUSH"){
-            commands.push_back("FLUSH");
-        }
-        else if(std::string(argv[i]) == "EXISTS"){
-            commands.push_back("EXISTS");
-            commands.push_back(argv[++i]);
+
+        if(conn_ready & (POLLRDHUP | POLLHUP | POLLERR)){
+            std::cout << "Connection Terminated." << std::endl;
+            goto CLEAN;
         }
     }
-
-    int32_t err = send_req(fd, commands);
-    if(err) goto L_DONE;
-
-    err = read_res(fd);
-    if(err) goto L_DONE;
-
-    L_DONE:
-        close(fd);
+    CLEAN:
+        close(client_fd);
+        freeaddrinfo(res);
         return 0;
+
 }

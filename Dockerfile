@@ -1,25 +1,31 @@
-# ----- BUILD ----- 
-FROM ubuntu:latest AS builder
+FROM ubuntu:24.04 AS builder
 
-RUN apt-get update && apt-get install -y \
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libgtest-dev \
     g++ \
-    make
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Makefile .
+COPY include/ include/
+COPY src/ src/
+
+RUN make all MODE=release
+
+FROM ubuntu:24.04 AS server
 
 WORKDIR /app
+COPY --from=builder /app/build/server ./build/server
+EXPOSE 5000
 
-COPY . .
+CMD ["./build/server"]
 
-RUN make
-
-# ----- RUNTIME ----- 
-FROM ubuntu:latest 
-
+FROM ubuntu:24.04 AS client
 WORKDIR /app
+COPY --from=builder /app/build/client ./build/client
+EXPOSE 5000
 
-COPY --from=builder /app/build/server . 
-
-EXPOSE 8080
-
-CMD ["./server"]
-
+CMD ["./build/client"]
