@@ -1,9 +1,16 @@
+networks:
+  kvs-network:
+    driver: bridge
+
 services:
   server:
     build:
       context: ./
       dockerfile: Dockerfile
       target: server
+    container_name: kv-server
+    networks:
+      - kvs-network
     ports:
       - "5000:5000"
     restart: unless-stopped
@@ -13,8 +20,13 @@ services:
       context: ./
       dockerfile: Dockerfile
       target: client
+    container_name: kv-client
+    networks:
+      - kvs-network
     command: ["./build/client", "--host", "server"]
     depends_on:
-      - server
+      server:
+        condition: service_started
     stdin_open: true
     tty: true
+    restart: unless-stopped
