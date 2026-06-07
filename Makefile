@@ -8,8 +8,7 @@ TESTFLAGS := -lgtest -lgtest_main -lpthread
 
 SERVER_SRCS = src/server.cpp \
 				src/storage/hashtable.cpp \
-				src/storage/avl.cpp \
-				src/storage/zset.cpp
+				src/storage/heap.cpp
 
 COMMON_SRCS = src/logs/log.cpp
 
@@ -37,7 +36,7 @@ $(BUILD)/server: $(SERVER_SRCS) $(COMMON_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/tests: tests/unit/test_heap.cpp src/storage/heap.cpp
+$(BUILD)/tests: tests/unit/test_heap.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) -o $@
 
@@ -46,6 +45,9 @@ run_tests: tests
 
 run_server: all 
 			./$(BUILD)/server 
+
+run_server_prod: all
+				./$(BUILD)/server &
 
 run_client: all 
 			./$(BUILD)/client --host $(HOST) 

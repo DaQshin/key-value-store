@@ -4,7 +4,8 @@ static const char* level_str[] = {
     "DEBUG", "INFO", "WARN", "ERROR"
 };
 
-void log_msg(LogLevel level, const char* file, int line, const char* fmt, ...){
+void log_msg(LogLevel level, const char* file, int line, const char* fmt, ...) {
+    if (static_cast<int>(level) < LOG_LEVEL) return;
     std::time_t t = std::time(nullptr);
     std::tm tm;
     localtime_r(&t, &tm);

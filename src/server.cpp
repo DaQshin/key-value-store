@@ -19,7 +19,7 @@
 #include <vector>
 #include <map>
 #include "list.h"
-#include "zset.h"
+#include "heap.h"
 #include "hashtable.h"
 #include "utils.h"
 #include "logs/log.h" 
@@ -29,16 +29,16 @@
 
 
 static void msg(const char* msg){
-    fprintf(stderr, "%s\n", msg);
+    LOG_ERROR("%s\n", msg);
 }
 
 static void msg_errno(const char* msg){
-    fprintf(stderr, "[error:%d] %s\n", errno, msg);
+    LOG_ERROR("[error:%d] %s\n", errno, msg);
 }
 
 static void die(const char* msg){
     int err = errno;
-    LOG_ERROR("%s (errno=%d: %s)", msg, errno, strerror(errno));
+    LOG_WARN("%s (errno=%d: %s)", msg, errno, strerror(errno));
     abort();
 }
 
@@ -106,14 +106,20 @@ struct Conn {
     uint64_t io_start_ms = 0;
     DList idle_node;
     DList io_node;
-};
 
+    explicit Conn(){
+        dlist_init(&idle_node);
+        dlist_init(&io_node);
+    }
+};
 
 static struct {
     HMap db;
 
     int epoll_fd;
     std::vector<Conn*> fd2conn;
+
+    std::vector<HeapItem> heap;
 
     DList idle_list;
     DList io_list;
@@ -129,34 +135,44 @@ enum {
 struct Entry{
     struct HNode node;
     std::string key;
+    std::string value;
+
+    size_t heap_idx = -1;
     
     uint32_t type = 0;
-
-    union {
-        std::string str;
-        ZSet zset;
-    };
 
     explicit Entry(){}
 
     explicit Entry(uint32_t type): type(type){
         if(type == T_STR){
-            new (&str) std::string;
-        }
-        else if(type == T_ZSET){
-            new (&zset) ZSet;
+            new (&value) std::string;
         }
     }
 
     ~Entry(){
         if(type == T_STR){
-            str.~basic_string();
-        }
-        else if(type == T_ZSET){
-            zset_clear(&zset);
+            value.~basic_string();
         }
     }
 };
+
+static void entry_set_ttl(Entry* ent, int64_t ttl){
+    if(ttl < 0 && ent->heap_idx != (size_t)-1){
+        heap_del(g_data.heap, ent->heap_idx);
+        ent->heap_idx = -1;
+    }
+    else if(ttl >= 0){
+        uint64_t expires_at = get_monotonic_msec() + (uint64_t)ttl;
+        HeapItem t = {expires_at, &ent->heap_idx};
+        heap_upsert(g_data.heap, ent->heap_idx, t);
+    }
+}
+
+void entry_del(Entry* key){
+    entry_set_ttl(key, -1);
+    delete key;    
+}
+
 
 static bool entry_eq(HNode* lhs, HNode* rhs){
     struct Entry* l = container_of(lhs, struct Entry, node);
@@ -207,11 +223,6 @@ static void out_dbl(Buffer& out, double data){
     buf_append_dbl(out, data);
 }
 
-static void out_arr(Buffer& out, uint32_t n){
-    buf_append_u8(out, TAG_ARRAY);
-    buf_append_u32(out, n);
-}
-
 static void get(std::vector<std::string>& cmd, Buffer& out){
     std::string val = "";
     if(!g_data.db.newer.table) {
@@ -223,7 +234,7 @@ static void get(std::vector<std::string>& cmd, Buffer& out){
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if(node){
-        val = container_of(node, struct Entry, node)->str;
+        val = container_of(node, struct Entry, node)->value;
     }
     else {
         out_nil(out);
@@ -239,12 +250,12 @@ static void set(std::vector<std::string>& cmd, Buffer& out){
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if(node){
-        container_of(node, struct Entry, node)->str.swap(cmd[2]);
+        container_of(node, struct Entry, node)->value.swap(cmd[2]);
     }
     else{
        struct Entry* ent = new Entry(T_STR);
        ent->key.swap(key.key);
-       ent->str.swap(cmd[2]);
+       ent->value.swap(cmd[2]);
        ent->node.hash = key.node.hash;
        hm_insert(&g_data.db, &ent->node);
     }   
@@ -302,70 +313,41 @@ static bool str2int(const std::string& str, int64_t& out){
     return end == str.c_str() + str.size() && !isnan(out);
 }
 
-static void zadd(std::vector<std::string>& cmd, Buffer& out){
-    double score = 0;
-    if(!str2dbl(cmd[2], score)){
-        return out_err(out, ERR_BAD_ARG, "arg: expect float");
+static void expire(std::vector<std::string>& cmd, Buffer& out){
+    int64_t ttl_ms = 0;
+    if(!str2int(cmd[2], ttl_ms)){
+        return out_err(out, ERR_BAD_ARG, "expect int64");
     }
 
-    struct Entry lookup_key;
-    lookup_key.key.swap(cmd[1]);
-    lookup_key.node.hash = str_hash((const uint8_t*)lookup_key.key.data(), lookup_key.key.size());
-    HNode* found = hm_lookup(&g_data.db, &lookup_key.node, &entry_eq);
-
-    struct Entry key;
-
-    if(!found){
-        key.type = T_ZSET;
-        key.key.swap(lookup_key.key);
-        key.node.hash = lookup_key.node.hash;
-    }
-    else {
-        struct Entry* ent = container_of(found, struct Entry, node);
-        if(ent->type != T_ZSET) return out_err(out, ERR_BAD_ARG, "type: expect zset");
+    Entry key;
+    key.key = cmd[1];
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if(node){
+        Entry* ent = container_of(node, Entry, node);
+        entry_set_ttl(ent, ttl_ms);
     }
 
-    const std::string& name = cmd[3];
-    bool added = zset_insert(&key.zset, name.data(), name.size(), score);
-    out_int(out, (int64_t)added);
+    return out_int(out, node ? 1 : 0);
 }
 
-static ZSet* get_zset(std::string key){
-    struct Entry lookup_key;
-    lookup_key.key = key;
-    lookup_key.node.hash = str_hash((const uint8_t*)lookup_key.key.data(), lookup_key.key.size());
-    HNode* found = hm_lookup(&g_data.db, &lookup_key.node, &entry_eq);
-    if(!found) return nullptr;
-
-    struct Entry* ent = container_of(found, struct Entry, node);
-    return ent->type ? &ent->zset : nullptr;
-}
-
-static void zrem(std::vector<std::string>& cmd, Buffer& out){
-    ZSet* zset = get_zset(cmd[1]);
-    if(!zset){
-        return out_err(out, ERR_BAD_ARG, "arg: expect zset");
+static void get_ttl(std::vector<std::string>& cmd, Buffer& out){
+    Entry key;
+    key.key = cmd[1];
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if(!node){
+        out_int(out, -2);
     }
-
-    const std::string& name = cmd[2];
-    ZNode* znode = zset_lookup(zset, name.data(), name.size());
-    if(znode){
-        zset_delete(zset, znode);
+    
+    Entry* ent = container_of(node, Entry, node);
+    if(ent->heap_idx == (size_t)-1){
+        out_int(out, -1);
     }
-
-    return out_int(out, znode ? 1 : 0);
-}
-
-static void zscore(std::vector<std::string>& cmd, Buffer& out){
-    ZSet* zset = get_zset(cmd[1]);
-    if(!zset){
-        return out_err(out, ERR_BAD_ARG, "arg: expect zset");
-    }
-
-    const std::string& name = cmd[2];
-    ZNode* znode = zset_lookup(zset, name.data(), name.size());
-
-    return znode ? out_dbl(out, znode->score) : out_nil(out);
+    
+    int64_t expires_at = g_data.heap[ent->heap_idx].val;
+    int64_t now_ms = get_monotonic_msec();
+    out_int(out, expires_at > now_ms ? (expires_at - now_ms) : 0);
 }
 
 static void do_request(std::vector<std::string>& cmd, Buffer& out){
@@ -374,8 +356,13 @@ static void do_request(std::vector<std::string>& cmd, Buffer& out){
          (void*)g_data.db.newer.table,
          g_data.db.newer.mask,
          g_data.db.newer.size);
+
+    if(cmd.size() == 1 && cmd[0] == "PING"){
+        std::string ping_msg = "hello client";
+        out_str(out, (const char*)ping_msg.data(), ping_msg.size());
+    }
     
-    if(cmd.size() == 2 && cmd[0] == "GET"){
+    else if(cmd.size() == 2 && cmd[0] == "GET"){
         LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
          cmd.size(),
          cmd[0].c_str(),
@@ -412,37 +399,18 @@ static void do_request(std::vector<std::string>& cmd, Buffer& out){
         flush(out);
     }
 
-    else if(cmd.size() == 4 && cmd[0] == "ZADD"){
-        zadd(cmd, out);
+    else if(cmd.size() == 3 && cmd[0] == "EXPIRE"){
+        expire(cmd, out);
     }
 
-    else if(cmd.size() == 3 && cmd[0] == "ZREM"){
-        zrem(cmd, out);
+    else if(cmd.size() == 2 && cmd[0] == "PTTL"){
+        get_ttl(cmd, out);
     }
 
-    else if(cmd.size() == 3 && cmd[0] == "ZSCORE"){
-        zscore(cmd, out);
-    }
-    
     else{
         out_err(out, ERR_UNKNOWN, "Unknown Command.");
     }
 }
-
-/*
-Protocol:
-
-Request:
-[4B total_len]
-[4B nstr]
-repeat nstr:
-    [4B len][bytes]
-
-Response:
-[4B total_len]
-[1B tag][payload...]
-
-*/
 
 static bool read_u32(const uint8_t*& cur, const uint8_t*& end, uint32_t* out){
     if(cur + 4 > end) return false;
@@ -478,14 +446,6 @@ static int32_t parse_req(const uint8_t*& data, size_t size, std::vector<std::str
 
     return 0;
 }
-
-// void log_payload(const uint8_t* data, size_t len) {
-//     printf("payload (%zu bytes): ", len);
-//     for (size_t i = 0; i < len; i++) {
-//         printf("%02x ", data[i]);
-//     }
-//     printf("\n");
-// }
 
 static void resp_header_alloc(Buffer& out, size_t* header){
     *header = out.size();
@@ -524,8 +484,6 @@ static bool try_one_request(Conn* conn){
     if(4 + total_len > conn->incoming.size()) return false;
 
     const uint8_t* request = &conn->incoming[4];
-
-    // log_payload(request, total_len);
     
     std::vector<std::string> cmd;
     if(parse_req(request, total_len, cmd) < 0){
@@ -533,12 +491,6 @@ static bool try_one_request(Conn* conn){
         conn->want_close = true;
         return false;
     }
-
-    printf("parsed cmd: ");
-    for (auto& s : cmd) {
-        printf("[%s] ", s.c_str());
-    }
-    printf("\n");
 
     size_t header_pos = 0;
     resp_header_alloc(conn->outgoing, &header_pos);
@@ -625,12 +577,10 @@ static void handle_write(Conn* conn){
     if(conn->outgoing.size() == 0){
         dlist_detach(&conn->io_node);
         conn->last_active_ms = get_monotonic_msec();
-        dlist_detach(&conn->io_node);
         dlist_insert_before(&g_data.io_list, &conn->io_node);
     }
 
     set_write(conn);
-
 }
 
 static void handle_read(Conn* conn){
@@ -652,8 +602,12 @@ static void handle_read(Conn* conn){
         }
 
         else if(rv == 0){
-            if(conn->incoming.size() == 0) msg("client closed");
-            else msg("Unexpected EOF");
+            if(conn->incoming.size() == 0){
+                LOG_INFO("client closed");
+            }
+            else{
+                msg("Unexpected EOF");
+            }
             conn->want_close = true;
             return;
         }
@@ -680,27 +634,33 @@ static void destroy(Conn* conn){
     delete conn;
 }
 
-const uint64_t k_idle_timeout_ms = 10 * 1000;
-const uint64_t k_io_timeout_ms = 5 * 1000;
+const uint64_t k_idle_timeout_ms = 30 * 1000;
+const uint64_t k_io_timeout_ms = 10 * 1000;
 
 static int64_t next_timer_ms(){
     int64_t now_ms = get_monotonic_msec();
 
-    int64_t next_ms = INT64_MAX;
-    int64_t next_idle_ms = INT64_MAX;
-    int64_t next_io_ms = INT64_MAX;
+    int64_t next_ms = -1;
+    int64_t next_idle_ms = -1;
+    int64_t next_io_ms = -1;
+    int64_t next_ttl_ms = -1;
 
     if(!dlist_empty(&g_data.idle_list)){
-        Conn* conn = container_of(&g_data.idle_list.next, Conn, idle_node);
+        Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
         next_idle_ms = conn->last_active_ms + k_idle_timeout_ms;
     }
 
     if(!dlist_empty(&g_data.io_list)){
-        Conn* conn = container_of(&g_data.io_list.next, Conn, io_node);
+        Conn* conn = container_of(g_data.io_list.next, Conn, io_node);
         next_io_ms = conn->io_start_ms + k_io_timeout_ms;
     }
 
-    next_ms = std::min(next_idle_ms, next_io_ms);
+    if(!g_data.heap.empty() && g_data.heap[0].val < next_idle_ms){
+        next_ttl_ms = g_data.heap[0].val;
+    }
+
+    next_ms = std::min(next_idle_ms, std::min(next_io_ms, next_ttl_ms));
+    if(next_ms == -1) return -1;
     if(next_ms <= now_ms) return 0;
     return (next_ms - now_ms);
 }
@@ -708,25 +668,35 @@ static int64_t next_timer_ms(){
 static void process_timers(){
     int64_t now_ms = get_monotonic_msec();
     while(!dlist_empty(&g_data.idle_list)){
-        Conn* conn = container_of(&g_data.idle_list.next, Conn, idle_node);
+        Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
         int64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
         if(next_ms >= now_ms) break;
 
-        fprintf(stderr, "removing idle connection[connection timeout]: %d\n", conn->fd);
+        LOG_WARN("removing idle connection[connection timeout]: %d\n", conn->fd);
         destroy(conn);
     }
 
     while(!dlist_empty(&g_data.io_list)){
-        Conn* conn = container_of(&g_data.io_list.next, Conn, io_node);
-        printf("%ld", conn->io_start_ms);
+        Conn* conn = container_of(g_data.io_list.next, Conn, io_node);
         int64_t end_ms = conn->io_start_ms + k_io_timeout_ms;
         if(end_ms >= now_ms) break;
 
-        fprintf(stderr, "removing idle connection[io timeout]: %d\n", conn->fd);
+        LOG_WARN("removing idle connection[io timeout]: %d\n", conn->fd);
         destroy(conn);
     }
-}
 
+    size_t k_max_works = 2000;
+    size_t n_works = 0;
+
+    while(!g_data.heap.empty() && g_data.heap[0].val < now_ms && n_works < k_max_works){
+        Entry* ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
+        HNode* node = hm_delete(&g_data.db, &ent->node, &entry_eq);
+        if(node != &ent->node){
+            LOG_ERROR("key expired: %s\n", ent->key.c_str());
+        }
+        n_works++;
+    }
+}
 
 int main(){
 
@@ -769,7 +739,7 @@ int main(){
     sev.data.fd = server_fd;
 
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &sev) < 0){
-        die("epoll_ctl");
+        die("epoll_ctl()");
     }
 
     epoll_event events[MAX_EVENTS];

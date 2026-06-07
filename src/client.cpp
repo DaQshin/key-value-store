@@ -33,7 +33,7 @@ enum {
     TAG_INT = 2,
     TAG_STR = 3,
     TAG_DBL = 4,
-    TAG_ARRAY = 5,
+    TAG_ARR = 5,
 };
 
 static int32_t print_response(const uint8_t* data, size_t size){
@@ -112,29 +112,6 @@ static int32_t print_response(const uint8_t* data, size_t size){
                 memcpy(&val, &data[1], 8);
                 printf("(double) %g\n", val);
                 return 1 + 8;
-            }
-
-        case TAG_ARRAY:
-            {
-                if(size < 1 + 4){
-                    msg("bad response");
-                    return -1;
-                }
-            }
-            {
-                uint32_t len = 0;
-                memcpy(&len, &data[1], 4);
-                printf("(arr) len=%d\n", len);
-                size_t arr_offset = 1 + 4;
-                for(uint32_t i = 0; i < len; i++){
-                    int32_t rv = print_response((const uint8_t*)& data[arr_offset], size - arr_offset);
-                    if(rv < 0){
-                        return rv;
-                    }
-                    arr_offset += (size_t)rv;
-                }
-                printf("(arr) end\n");
-                return (int32_t)arr_offset;
             }
         
         default:
@@ -234,22 +211,7 @@ static int32_t read_res(int fd){
 int32_t parse_cmd(std::vector<std::string>& cmd, const std::string& line){
     std::istringstream stream(line);
     std::string token;
-
-    stream >> token;
-
-    if( 
-        token != "PING" && 
-        token != "GET" && 
-        token != "SET" && 
-        token != "DEL" && 
-        token != "FLUSH" && 
-        token != "EXISTS" && 
-        token != "ZADD" && 
-        token != "ZREM" &&
-        token != "ZSCORE") return -1;
-
-    cmd.push_back(token);
-
+    
     while(stream >> token){
         cmd.push_back(token);
     }
@@ -278,7 +240,9 @@ int main(int argc, char** argv){
 
     struct addrinfo* res = nullptr;
 
-    if(getaddrinfo(host, "5000", &addr, &res) < 0){
+    int rv = getaddrinfo(host, "5000", &addr, &res);
+    if(rv < 0){
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         die("getaddrinfo()");
     }
 
@@ -317,16 +281,12 @@ int main(int argc, char** argv){
 
             std::vector<std::string> commands;
 
+            if(line == "exit()") goto CLEAN;
+
             if(parse_cmd(commands, line) < 0){
                 std::cout << "Invalid Command" << std::endl; 
                 continue;
             }
-
-            if(commands.size() == 1 && commands[0] == "exit()"){
-                goto CLEAN;
-            }
-
-            if(commands.size() == 0) continue;
             
             if(send_req(client_fd, commands) < 0) {
                 LOG_ERROR("Connection Failed");
@@ -351,7 +311,6 @@ int main(int argc, char** argv){
     }
     CLEAN:
         close(client_fd);
-        freeaddrinfo(res);
         return 0;
 
 }
