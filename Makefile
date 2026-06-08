@@ -8,7 +8,8 @@ TESTFLAGS := -lgtest -lgtest_main -lpthread
 
 SERVER_SRCS = src/server.cpp \
 				src/storage/hashtable.cpp \
-				src/storage/heap.cpp
+				src/storage/heap.cpp \
+# 				src/thread_pool.cpp
 
 COMMON_SRCS = src/logs/log.cpp
 

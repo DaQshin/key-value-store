@@ -64,7 +64,6 @@ static uint64_t get_monotonic_msec(){
     return uint64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000 / 1000;
 }
 
-
 const size_t k_max_msg = 32 << 20;
 
 typedef std::vector<uint8_t> Buffer;
@@ -148,13 +147,9 @@ struct Entry{
             new (&value) std::string;
         }
     }
-
-    ~Entry(){
-        if(type == T_STR){
-            value.~basic_string();
-        }
-    }
 };
+
+const int64_t k_max_ttl = 10 << 10;
 
 static void entry_set_ttl(Entry* ent, int64_t ttl){
     if(ttl < 0 && ent->heap_idx != (size_t)-1){
@@ -240,7 +235,7 @@ static void get(std::vector<std::string>& cmd, Buffer& out){
         out_nil(out);
     }
 
-    assert(val.size() <= k_max_msg);
+    if(val.size() > k_max_msg) return;
     out_str(out, (const char*)val.data(), val.size());
 }
 
@@ -304,13 +299,13 @@ static void exists(std::vector<std::string>& cmd, Buffer& out){
 static bool str2dbl(const std::string& str, double& out){
     char* end = nullptr;
     out = strtod(str.c_str(), &end);
-    return end == str.c_str() + str.size() && !isnan(out);
+    return end == str.c_str() + str.size();
 }
 
 static bool str2int(const std::string& str, int64_t& out){
     char* end = nullptr;
     out = strtoll(str.c_str(), &end, 10);
-    return end == str.c_str() + str.size() && !isnan(out);
+    return end == str.c_str() + str.size();
 }
 
 static void expire(std::vector<std::string>& cmd, Buffer& out){
@@ -337,12 +332,12 @@ static void get_ttl(std::vector<std::string>& cmd, Buffer& out){
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if(!node){
-        out_int(out, -2);
+        return out_int(out, -2);
     }
     
     Entry* ent = container_of(node, Entry, node);
     if(ent->heap_idx == (size_t)-1){
-        out_int(out, -1);
+        return out_int(out, -1);
     }
     
     int64_t expires_at = g_data.heap[ent->heap_idx].val;
@@ -559,7 +554,7 @@ static void set_write(Conn* conn){
 }
 
 static void handle_write(Conn* conn){
-    assert(conn->outgoing.size() > 0);
+    if(conn->outgoing.size() == 0) return;
     
     while(conn->outgoing.size() > 0){
         ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
@@ -640,10 +635,10 @@ const uint64_t k_io_timeout_ms = 10 * 1000;
 static int64_t next_timer_ms(){
     int64_t now_ms = get_monotonic_msec();
 
-    int64_t next_ms = -1;
-    int64_t next_idle_ms = -1;
-    int64_t next_io_ms = -1;
-    int64_t next_ttl_ms = -1;
+    int64_t next_ms = INT64_MAX;
+    int64_t next_idle_ms = INT64_MAX;
+    int64_t next_io_ms = INT64_MAX;
+    int64_t next_ttl_ms = INT64_MAX;
 
     if(!dlist_empty(&g_data.idle_list)){
         Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
@@ -660,7 +655,7 @@ static int64_t next_timer_ms(){
     }
 
     next_ms = std::min(next_idle_ms, std::min(next_io_ms, next_ttl_ms));
-    if(next_ms == -1) return -1;
+    if(next_ms == INT64_MAX) return -1;
     if(next_ms <= now_ms) return 0;
     return (next_ms - now_ms);
 }
@@ -692,8 +687,9 @@ static void process_timers(){
         Entry* ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
         HNode* node = hm_delete(&g_data.db, &ent->node, &entry_eq);
         if(node != &ent->node){
-            LOG_ERROR("key expired: %s\n", ent->key.c_str());
+            LOG_WARN("key expired: %s\n", ent->key.c_str());
         }
+        entry_del(ent);
         n_works++;
     }
 }
