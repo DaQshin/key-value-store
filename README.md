@@ -1,6 +1,6 @@
 # Key-Value Store
 
-A fast, in-memory key-value store written in C++ with support for string operations and sorted sets.
+A high-performance in-memory key-value store implemented in modern C++ with a focus on efficiency, reliability, and low-latency access.
 
 ---
 
