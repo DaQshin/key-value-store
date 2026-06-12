@@ -6,16 +6,16 @@
 #include <poll.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include <netinet/ip.h>
 #include <netdb.h>
 #include <string.h>
 #include <assert.h>
 #include <vector>
 #include "logs/log.h"
+#include "client.h"
 
 #define PORT 5000
 
-const size_t k_max_msg = 4096;
+// const size_t k_max_msg = 4096;
 
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
@@ -82,7 +82,7 @@ static int32_t print_response(const uint8_t* data, size_t size){
                     return -1;
                 }
 
-                printf("(str) %d %.*s \n", len, len, &data[1 + 4]);
+                printf("(str) %d %.*s \n", len, &data[1 + 4]);
                 return 1 + 4 + len;
             }
 

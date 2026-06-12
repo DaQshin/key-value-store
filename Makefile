@@ -8,10 +8,12 @@ TESTFLAGS := -lgtest -lgtest_main -lpthread
 
 SERVER_SRCS = src/server.cpp \
 				src/storage/hashtable.cpp \
-				src/storage/heap.cpp \
-# 				src/thread_pool.cpp
+				src/storage/heap.cpp
 
 COMMON_SRCS = src/logs/log.cpp
+
+BENCH_SRCS = $(wildcard bench/*.cpp)
+TEST_SRCS = $(wildcard tests/*.cpp)
 
 ifeq ($(MODE), debug)
     CXXFLAGS += -g -O0 -DLOG_LEVEL=0
@@ -28,6 +30,7 @@ endif
 
 all: $(BUILD)/client $(BUILD)/server
 tests: $(BUILD)/tests
+bench: $(BUILD)/bench
 
 $(BUILD)/client: src/client.cpp $(COMMON_SRCS)
 	mkdir -p $(BUILD)
@@ -40,6 +43,13 @@ $(BUILD)/server: $(SERVER_SRCS) $(COMMON_SRCS)
 $(BUILD)/tests: tests/unit/test_heap.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) -o $@
+
+$(BUILD)/bench: bench/*
+	mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+	
+run_bench: bench 
+			./$(BUILD)/bench
 
 run_tests: tests 
 			./$(BUILD)/tests
