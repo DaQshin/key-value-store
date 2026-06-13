@@ -1,19 +1,28 @@
 #include "logs/log.h"
+#include <cstdarg>
+#include <cstdio>
 
-static const char* level_str[] = {
-    "DEBUG", "INFO", "WARN", "ERROR"
-};
+static const char* level_to_string(LogLevel level) {
+    switch(level) {
+        case LVL_DEBUG: return "DEBUG";
+        case LVL_INFO:  return "INFO";
+        case LVL_WARN:  return "WARN";
+        case LVL_ERROR: return "ERROR";
+        default:        return "UNKNOWN";
+    }
+}
 
-void log_msg(LogLevel level, const char* file, int line, const char* fmt, ...) {
-    if (static_cast<int>(level) < LOG_LEVEL) return;
-    std::time_t t = std::time(nullptr);
-    std::tm tm;
-    localtime_r(&t, &tm);
+void log_msg(LogLevel level,
+             const char* file,
+             int line,
+             const char* fmt,
+             ...) {
 
-    char timebuf[32];
-    std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tm);
-
-    std::fprintf(stderr, "%s [%s] %s:%d ", timebuf, level_str[level], file, line);
+    std::fprintf(stderr,
+                 "[%s] %s:%d: ",
+                 level_to_string(level),
+                 file,
+                 line);
 
     va_list args;
     va_start(args, fmt);

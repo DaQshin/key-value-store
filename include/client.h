@@ -5,6 +5,7 @@
 #include <cstring>
 #include <vector>
 #include <variant>
+#include <string>
 
 const uint32_t k_max_msg = 4096; 
 
@@ -93,6 +94,11 @@ public:
 
         return true;
     }
+
+    void exec_repl_mode(){
+        
+    }
+
 
 private:
 

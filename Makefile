@@ -1,10 +1,10 @@
 CXX := g++
 MODE ?= debug
 BUILD := build
-HOST ?= 127.0.0.1
 
 CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
 TESTFLAGS := -lgtest -lgtest_main -lpthread
+BENCHFLAGS := -O2 -DNDEBUG -DLOG_LEVEL=0
 
 SERVER_SRCS = src/server.cpp \
 				src/storage/hashtable.cpp \
@@ -26,7 +26,7 @@ else
 
 endif
 
-.PHONY: all clean run_server run_client tests run_tests
+.PHONY: all clean run_server run_client tests run_tests bench run_bench run_server_prod
 
 all: $(BUILD)/client $(BUILD)/server
 tests: $(BUILD)/tests
@@ -44,7 +44,7 @@ $(BUILD)/tests: tests/unit/test_heap.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) -o $@
 
-$(BUILD)/bench: bench/*
+$(BUILD)/bench: $(BENCH_SRCS) $(COMMON_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 	
@@ -61,7 +61,7 @@ run_server_prod: all
 				./$(BUILD)/server &
 
 run_client: all 
-			./$(BUILD)/client --host $(HOST) 
+			./$(BUILD)/client
 
 clean:
 	rm -rf $(BUILD)

@@ -177,7 +177,7 @@ static int send_req(int fd, std::vector<std::string>& cmd){
 static int32_t read_res(int fd){
     uint8_t rbuf[4 + k_max_msg];
     errno = 0;
-    int32_t err = read_full(fd, rbuf, 4);
+    int32_t err = read_full(fd, &rbuf[0], 4);
     if(err){
         if(errno == 0){
             msg("EOF");
@@ -221,13 +221,7 @@ int32_t parse_cmd(std::vector<std::string>& cmd, const std::string& line){
 
 int main(int argc, char** argv){
     const char* host = "127.0.0.1";
-    for(int i = 1; i < argc; i++){
-        if(std::string(argv[i]) == "--host"){
-            if(i + 1 < argc) host = argv[i + 1];
-            else die("hostname not provided");
-        }
-    }
-
+    
     int client_fd = socket(AF_INET, SOCK_STREAM, 0);
 
     if(client_fd < 0){

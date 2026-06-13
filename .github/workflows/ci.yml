@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - "README.md"
+      - ".gitignore"
+      - ".dockerignore"
+      - "Makefile"
+      - "docs/*"
+    branches: [main]
+
+  pull_request:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and Run Tests
+        run: make run_tests
+
+  bench:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Benchmarks
+        run: make run_bench
