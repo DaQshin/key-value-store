@@ -33,12 +33,13 @@ static void heap_down(HeapItem* a, size_t pos, size_t len){
         size_t min_pos = pos;
         uint64_t min_val = t.val;
 
-        if(l < len && a[pos].val < min_val){
+        if(l < len && a[l].val < min_val){
             min_pos = l;
             min_val = a[l].val;
         }
-        if(r < len && a[pos].val < min_val){
+        if(r < len && a[r].val < min_val){
             min_pos = r;
+            min_val = a[r].val;
         }
 
         if(min_pos == pos) break;

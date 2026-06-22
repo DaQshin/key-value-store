@@ -10,7 +10,7 @@
 #include <string.h>
 #include <assert.h>
 #include <vector>
-#include "logs/log.h"
+#include "utils/log.h"
 #include "client.h"
 
 #define PORT 5000

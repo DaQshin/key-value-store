@@ -26,11 +26,11 @@ int main(){
     double cum_latency_send = 0.0;
     double cum_latency_receive = 0.0;
     std::vector<double> send_latencies;
-    std::vector<double> recieve_latencies;
+    std::vector<double> receive_latencies;
     std::vector<std::string> keys(N, "");
 
-    send_latencies.reserve(N);
-    recieve_latencies.reserve(N);
+    send_latencies.resize(N);
+    receive_latencies.resize(N);
 
     for(int i = 0; i < N; i++){
         keys[i] += "key" + std::to_string(i);
@@ -44,7 +44,7 @@ int main(){
 
     auto start = std::chrono::steady_clock::now();
 
-    for(int i = 0; i < 10000; i++){
+    for(int i = 0; i < N; i++){
 
         auto t1 = std::chrono::steady_clock::now();
 
@@ -67,9 +67,9 @@ int main(){
         auto t3 = std::chrono::steady_clock::now();
 
         send_latencies[i] = std::chrono::duration<double, std::milli>(t2 - t1).count();
-        recieve_latencies[i] = std::chrono::duration<double, std::milli>(t3 - t2).count();
+        receive_latencies[i] = std::chrono::duration<double, std::milli>(t3 - t2).count();
 
-        cum_latency_receive += recieve_latencies[i];
+        cum_latency_receive += receive_latencies[i];
         cum_latency_send += send_latencies[i];
     }
 
@@ -85,9 +85,9 @@ int main(){
     double ls_p95 = percentile(send_latencies, 0.95);
     double ls_p99 = percentile(send_latencies, 0.99);
 
-    double lr_p50 = percentile(recieve_latencies, 0.50);
-    double lr_p95 = percentile(recieve_latencies, 0.95);
-    double lr_p99 = percentile(recieve_latencies, 0.99);
+    double lr_p50 = percentile(receive_latencies, 0.50);
+    double lr_p95 = percentile(receive_latencies, 0.95);
+    double lr_p99 = percentile(receive_latencies, 0.99);
 
     std::cout << "Elapsed:" << seconds << " sec\n";
 

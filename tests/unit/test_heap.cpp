@@ -1,93 +1,98 @@
 #include "heap.h"
-#include <vector>
+
+#include <catch2/catch_test_macros.hpp>
+
 #include <map>
-#include <gtest/gtest.h>
+#include <vector>
+#include <cstdint>
+#include <memory>
 
-class HeapTest: public ::testing::Test{
-protected: 
-    struct Data{
-        size_t heap_idx = -1;
+class HeapTest {
+protected:
+    struct Data {
+        size_t heap_idx = static_cast<size_t>(-1);
     };
 
-    struct Container{
+    struct Container {
         std::vector<HeapItem> heap;
-        std::multimap<uint64_t, Data*> map;
+        std::multimap<uint64_t, std::unique_ptr<Data>> map;
     };
 
-    void dispose(Container& c);
     void add(Container& c, uint64_t val);
     void del(Container& c, uint64_t val);
     void verify(Container& c);
 };
 
-void HeapTest::dispose(Container& c){
-    for(auto p: c.map){
-        delete p.second;
-    }
-}
 
 void HeapTest::add(Container& c, uint64_t val){
     Data* d = new Data();
+
+    d->heap_idx = c.heap.size();
+
     c.map.insert(std::make_pair(val, d));
-    HeapItem t;
+    
+    HeapItem t{};
     t.val = val;
     t.ref = &d->heap_idx;
+
     c.heap.push_back(t);
-    heap_update(c.heap.data(), c.heap.size() - 1, c.heap.size());
+    heap_update(c.heap.data(), d->heap_idx, c.heap.size());
+
 }
 
 void HeapTest::verify(Container& c){
-    ASSERT_EQ(c.heap.size(), c.map.size()) << "Heap size does not match with Map size";
+    REQUIRE(c.map.size() == c.heap.size());
+
     for(size_t pos = 0; pos < c.heap.size(); pos++){
         size_t l = heap_left(pos);
         size_t r = heap_right(pos);
 
-        ASSERT_TRUE(l >= c.heap.size() || c.heap[pos].val <= c.heap[l].val);
-        ASSERT_TRUE(r >= c.heap.size() || c.heap[pos].val <= c.heap[r].val);
-        ASSERT_EQ(*c.heap[pos].ref, pos);
+        REQUIRE((l >= c.heap.size() || c.heap[l].val >= c.heap[pos].val));
+        REQUIRE((r >= c.heap.size() || c.heap[r].val >= c.heap[pos].val));
+        REQUIRE(*c.heap[pos].ref == pos);
     }
 }
 
 void HeapTest::del(Container& c, uint64_t val){
     auto it = c.map.find(val);
-    ASSERT_NE(it, c.map.end());
-    Data* d = it->second;
-    ASSERT_EQ(c.heap.at(d->heap_idx).val, val);
-    ASSERT_EQ(c.heap.at(d->heap_idx).ref, &d->heap_idx);
+    REQUIRE(it != c.map.end());
+    Data* d = it->second.get();
 
-    c.heap[d->heap_idx] = c.heap.back();
-    c.heap.pop_back();
-    if (d->heap_idx < c.heap.size()) {
-        heap_update(c.heap.data(), d->heap_idx, c.heap.size());
-    }
-    delete d;
+    REQUIRE(c.heap.at(d->heap_idx).val == val);
+    REQUIRE(c.heap.at(d->heap_idx).ref == &d->heap_idx);
+
+    heap_del(c.heap, d->heap_idx);
     c.map.erase(it);
 }
 
-TEST_F(HeapTest, AddValues){
-    for(uint32_t i = 0; i < 50; i++){
+TEST_CASE_METHOD(HeapTest, "AddValues", "[heap]"){
+    for(int i = 0; i < 50; i++){
         Container c;
-        for(uint32_t j = 0; j < 50; j++){
+
+        for(int j = 0; j < 50; j++){
             add(c, j);
         }
 
         verify(c);
+
         add(c, i);
+
         verify(c);
-        dispose(c);
     }
 }
 
-TEST_F(HeapTest, DeleteValues){
-    for(uint32_t i = 0; i < 50; i++){
+TEST_CASE_METHOD(HeapTest, "DeleteValues", "[heap]"){
+    for(int i = 0; i < 50; i++){
         Container c;
-        for(uint32_t j = 0; j < 50; j++){
+
+        for(int j = 0; j < 50; j++){
             add(c, j);
         }
 
         verify(c);
+
         del(c, i);
+
         verify(c);
-        dispose(c);
     }
 }

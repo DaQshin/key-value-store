@@ -7,7 +7,6 @@
 #include <iostream>
 #include <errno.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <time.h>
 #include <limits.h>
 #include <sys/epoll.h>
@@ -20,8 +19,8 @@
 #include "list.h"
 #include "heap.h"
 #include "hashtable.h"
-#include "utils.h"
-#include "logs/log.h" 
+#include "utils/utils.h"
+#include "utils/log.h" 
 
 #define PORT 5000
 #define MAX_EVENTS 64
@@ -29,10 +28,6 @@
 
 static void msg(const char* msg){
     LOG_ERROR("%s\n", msg);
-}
-
-static void msg_errno(const char* msg){
-    LOG_ERROR("[error:%d] %s\n", errno, msg);
 }
 
 static void die(const char* msg){

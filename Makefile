@@ -3,14 +3,14 @@ MODE ?= debug
 BUILD := build
 
 CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
-TESTFLAGS := -lgtest -lgtest_main -lpthread
+TESTFLAGS := -lCatch2Main -lCatch2
 BENCHFLAGS := -O2 -DNDEBUG -DLOG_LEVEL=0
 
 SERVER_SRCS = src/server.cpp \
 				src/storage/hashtable.cpp \
 				src/storage/heap.cpp
 
-COMMON_SRCS = src/logs/log.cpp
+COMMON_SRCS = src/utils/log.cpp
 
 BENCH_SRCS = $(wildcard bench/*.cpp)
 TEST_SRCS = $(wildcard tests/*.cpp)
@@ -40,11 +40,11 @@ $(BUILD)/server: $(SERVER_SRCS) $(COMMON_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/tests: tests/unit/test_heap.cpp
+$(BUILD)/tests: tests/unit/test_heap.cpp src/storage/heap.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) -o $@
 
-$(BUILD)/bench: $(BENCH_SRCS) $(COMMON_SRCS)
+$(BUILD)/bench: $(BENCH_SRCS)
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 	
