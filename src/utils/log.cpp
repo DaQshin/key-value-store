@@ -1,33 +1,29 @@
-#include "utils/log.h"
-#include <cstdarg>
-#include <cstdio>
+#include <utils/log.h>
+#include <spdlog/async.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <memory>
 
-static const char* level_to_string(LogLevel level) {
-    switch(level) {
-        case LVL_DEBUG: return "DEBUG";
-        case LVL_INFO:  return "INFO";
-        case LVL_WARN:  return "WARN";
-        case LVL_ERROR: return "ERROR";
-        default:        return "UNKNOWN";
+namespace logs
+{
+    void init(const std::string &log_path, spdlog::level::level_enum level)
+    {
+        spdlog::init_thread_pool(65536, 1);
+
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            log_path, 100 * 1024 * 1024, 5);
+
+        std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
+        auto logger = std::make_shared<spdlog::async_logger>(
+            "kvstore",
+            sinks.begin(), sinks.end(),
+            spdlog::thread_pool(),
+            spdlog::async_overflow_policy::overrun_oldest);
+
+        spdlog::set_default_logger(logger);
+        spdlog::set_level(level);
+        spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [tid %t] %v");
+        spdlog::flush_on(spdlog::level::warn);
     }
-}
-
-void log_msg(LogLevel level,
-             const char* file,
-             int line,
-             const char* fmt,
-             ...) {
-
-    std::fprintf(stderr,
-                 "[%s] %s:%d: ",
-                 level_to_string(level),
-                 file,
-                 line);
-
-    va_list args;
-    va_start(args, fmt);
-    std::vfprintf(stderr, fmt, args);
-    va_end(args);
-
-    std::fprintf(stderr, "\n");
-}
+} // namespace log

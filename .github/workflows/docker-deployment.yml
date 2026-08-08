@@ -1,0 +1,5 @@
+name: Docker Deployment
+
+on:
+  push:
+    branches: [main]

@@ -20,26 +20,31 @@
 #include "heap.h"
 #include "hashtable.h"
 #include "utils/utils.h"
-#include "utils/log.h" 
+#include "utils/log.h"
 
 #define PORT 5000
 #define MAX_EVENTS 64
 
+using namespace hashtable;
 
-static void msg(const char* msg){
-    LOG_ERROR("%s\n", msg);
+static void msg(const char *msg)
+{
+    spdlog::error("{}", msg);
 }
 
-static void die(const char* msg){
+static void die(const char *msg)
+{
     int err = errno;
-    LOG_WARN("%s (errno=%d: %s)", msg, errno, strerror(errno));
+    spdlog::warn("{} (errno={}: {})", msg, errno, strerror(errno));
     abort();
 }
 
-static void fd_set_nb(int fd){
+static void fd_set_nb(int fd)
+{
     errno = 0;
     int flags = fcntl(fd, F_GETFL, 0);
-    if(errno){
+    if (errno)
+    {
         die("fcntl() get");
     }
 
@@ -47,12 +52,14 @@ static void fd_set_nb(int fd){
 
     errno = 0;
     fcntl(fd, F_SETFL, flags);
-    if(errno){
+    if (errno)
+    {
         die("fcntl() set");
     }
 }
 
-static uint64_t get_monotonic_msec(){
+static uint64_t get_monotonic_msec()
+{
     struct timespec ts = {0, 0};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return uint64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000 / 1000;
@@ -62,14 +69,16 @@ const size_t k_max_msg = 32 << 20;
 
 typedef std::vector<uint8_t> Buffer;
 
-enum {
+enum
+{
     ERR_UNKNOWN = 1,
     ERR_TOO_BIG = 2,
     ERR_BAD_ARG = 3,
     ERR_BAD_TYP = 4
 };
 
-enum {
+enum
+{
     TAG_NIL = 0,
     TAG_ERR = 1,
     TAG_INT = 2,
@@ -78,15 +87,18 @@ enum {
     TAG_ARRAY = 5,
 };
 
-static void buf_append(Buffer &buf, const uint8_t* data, size_t len){
-    buf.insert(buf.end(), data, data + len); 
+static void buf_append(Buffer &buf, const uint8_t *data, size_t len)
+{
+    buf.insert(buf.end(), data, data + len);
 }
 
-static void buf_consume(Buffer &buf, size_t n){
-    buf.erase(buf.begin(), buf.begin() + n); 
+static void buf_consume(Buffer &buf, size_t n)
+{
+    buf.erase(buf.begin(), buf.begin() + n);
 }
 
-struct Conn {
+struct Conn
+{
     int fd = -1;
     bool want_read = false;
     bool want_write = false;
@@ -100,17 +112,19 @@ struct Conn {
     DList idle_node;
     DList io_node;
 
-    explicit Conn(){
+    explicit Conn()
+    {
         dlist_init(&idle_node);
         dlist_init(&io_node);
     }
 };
 
-static struct {
+static struct
+{
     HMap db;
 
     int epoll_fd;
-    std::vector<Conn*> fd2conn;
+    std::vector<Conn *> fd2conn;
 
     std::vector<HeapItem> heap;
 
@@ -119,25 +133,29 @@ static struct {
 
 } g_data;
 
-enum {
+enum
+{
     T_INIT = 0,
     T_STR = 1,
     T_ZSET = 2,
 };
 
-struct Entry{
-    struct HNode node;
+struct Entry
+{
+    HNode node;
     std::string key;
     std::string value;
 
     size_t heap_idx = -1;
-    
+
     uint32_t type = 0;
 
-    explicit Entry(){}
+    explicit Entry() {}
 
-    explicit Entry(uint32_t type): type(type){
-        if(type == T_STR){
+    explicit Entry(uint32_t type) : type(type)
+    {
+        if (type == T_STR)
+        {
             new (&value) std::string;
         }
     }
@@ -145,337 +163,401 @@ struct Entry{
 
 const int64_t k_max_ttl = 10 << 10;
 
-static void entry_set_ttl(Entry* ent, int64_t ttl){
-    if(ttl < 0 && ent->heap_idx != (size_t)-1){
+static void entry_set_ttl(Entry *ent, int64_t ttl)
+{
+    if (ttl < 0 && ent->heap_idx != (size_t)-1)
+    {
         heap_del(g_data.heap, ent->heap_idx);
         ent->heap_idx = -1;
     }
-    else if(ttl >= 0){
+    else if (ttl >= 0)
+    {
         uint64_t expires_at = get_monotonic_msec() + (uint64_t)ttl;
         HeapItem t = {expires_at, &ent->heap_idx};
         heap_upsert(g_data.heap, ent->heap_idx, t);
     }
 }
 
-void entry_del(Entry* key){
+void entry_del(Entry *key)
+{
     entry_set_ttl(key, -1);
-    delete key;    
+    delete key;
 }
 
-
-static bool entry_eq(HNode* lhs, HNode* rhs){
-    struct Entry* l = container_of(lhs, struct Entry, node);
-    struct Entry* r = container_of(rhs, struct Entry, node);
+static bool entry_eq(HNode *lhs, HNode *rhs)
+{
+    struct Entry *l = container_of(lhs, struct Entry, node);
+    struct Entry *r = container_of(rhs, struct Entry, node);
     return l->key == r->key;
 }
 
-static void buf_append_u8(Buffer& buf, uint8_t data){
+static void buf_append_u8(Buffer &buf, uint8_t data)
+{
     buf.push_back(data);
 }
 
-static void buf_append_u32(Buffer& buf, uint32_t data){
-    buf_append(buf, (const uint8_t*)&data, 4);
+static void buf_append_u32(Buffer &buf, uint32_t data)
+{
+    buf_append(buf, (const uint8_t *)&data, 4);
 }
 
-static void buf_append_i64(Buffer& buf, int64_t data){
-    buf_append(buf, (const uint8_t*)&data, 8);
+static void buf_append_i64(Buffer &buf, int64_t data)
+{
+    buf_append(buf, (const uint8_t *)&data, 8);
 }
 
-static void buf_append_dbl(Buffer& buf, double data){
-    buf_append(buf, (const uint8_t*)& data, 8);
+static void buf_append_dbl(Buffer &buf, double data)
+{
+    buf_append(buf, (const uint8_t *)&data, 8);
 }
 
-static void out_nil(Buffer& out){
+static void out_nil(Buffer &out)
+{
     buf_append_u8(out, TAG_NIL);
 }
 
-static void out_err(Buffer& out, uint32_t code, const std::string& msg){
+static void out_err(Buffer &out, uint32_t code, const std::string &msg)
+{
     buf_append_u8(out, TAG_ERR);
     buf_append_u32(out, code);
     buf_append_u32(out, (uint32_t)msg.size());
-    buf_append(out, (const uint8_t*) msg.data(), msg.size());
+    buf_append(out, (const uint8_t *)msg.data(), msg.size());
 }
 
-static void out_str(Buffer& out, const char* data, size_t size){
+static void out_str(Buffer &out, const char *data, size_t size)
+{
     buf_append_u8(out, TAG_STRING);
     buf_append_u32(out, (uint32_t)size);
-    buf_append(out, (const uint8_t*)data, size);
+    buf_append(out, (const uint8_t *)data, size);
 }
 
-static void out_int(Buffer& out, int64_t data){
+static void out_int(Buffer &out, int64_t data)
+{
     buf_append_u8(out, TAG_INT);
     buf_append_i64(out, data);
 }
 
-static void out_dbl(Buffer& out, double data){
+static void out_dbl(Buffer &out, double data)
+{
     buf_append_u8(out, TAG_DOUBLE);
     buf_append_dbl(out, data);
 }
 
-static void get(std::vector<std::string>& cmd, Buffer& out){
+static void get(std::vector<std::string> &cmd, Buffer &out)
+{
     std::string val = "";
-    if(!g_data.db.newer.table) {
+    if (!g_data.db.newer.table)
+    {
         out_nil(out);
         return;
     }
     struct Entry key{T_STR};
     key.key.swap(cmd[1]);
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-    if(node){
+    key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (node)
+    {
         val = container_of(node, struct Entry, node)->value;
     }
-    else {
+    else
+    {
         out_nil(out);
+        return;
     }
 
-    if(val.size() > k_max_msg) return;
-    out_str(out, (const char*)val.data(), val.size());
+    if (val.size() > k_max_msg)
+        return;
+    out_str(out, (const char *)val.data(), val.size());
 }
 
-static void set(std::vector<std::string>& cmd, Buffer& out){
+static void set(std::vector<std::string> &cmd, Buffer &out)
+{
     struct Entry key{T_STR};
     key.key.swap(cmd[1]);
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-    if(node){
+    key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (node)
+    {
         container_of(node, struct Entry, node)->value.swap(cmd[2]);
     }
-    else{
-       struct Entry* ent = new Entry(T_STR);
-       ent->key.swap(key.key);
-       ent->value.swap(cmd[2]);
-       ent->node.hash = key.node.hash;
-       hm_insert(&g_data.db, &ent->node);
-    }   
+    else
+    {
+        struct Entry *ent = new Entry(T_STR);
+        ent->key.swap(key.key);
+        ent->value.swap(cmd[2]);
+        ent->node.hash = key.node.hash;
+        hm_insert(&g_data.db, &ent->node);
+    }
 
     std::string response = "Operation successful.";
-    out_str(out, (const char*)response.data(), response.size());
+    out_str(out, (const char *)response.data(), response.size());
 }
 
-static void del(std::vector<std::string>& cmd, Buffer& out){
+static void del(std::vector<std::string> &cmd, Buffer &out)
+{
     std::string response = "Operation successful.";
-    if(!g_data.db.newer.table) {
+    if (!g_data.db.newer.table)
+    {
         response = "Empty DB.";
-        out_str(out, (const char*)response.data(), response.size());
+        out_str(out, (const char *)response.data(), response.size());
         return;
     }
     struct Entry key{T_STR};
     key.key.swap(cmd[1]);
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-    if(node){
+    key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (node)
+    {
         hm_delete(&g_data.db, node, &entry_eq);
         delete container_of(node, struct Entry, node);
     }
-    else response = "Value Not Found.";
+    else
+        response = "Value Not Found.";
 
-    out_str(out, (const char*)response.data(), response.size());
-
+    out_str(out, (const char *)response.data(), response.size());
 }
 
-static void flush(Buffer& out){
+static void flush(Buffer &out)
+{
     hm_clear(&g_data.db);
     std::string response = "Operation successful.";
-    out_str(out, (const char*)response.data(), response.size());
+    out_str(out, (const char *)response.data(), response.size());
 }
 
-static void exists(std::vector<std::string>& cmd, Buffer& out){
+static void exists(std::vector<std::string> &cmd, Buffer &out)
+{
     struct Entry key{T_STR};
     key.key.swap(cmd[1]);
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     uint8_t exists = node ? 1 : 0;
 
     out_int(out, (int64_t)exists);
 }
 
-static bool str2dbl(const std::string& str, double& out){
-    char* end = nullptr;
+static bool str2dbl(const std::string &str, double &out)
+{
+    char *end = nullptr;
     out = strtod(str.c_str(), &end);
     return end == str.c_str() + str.size();
 }
 
-static bool str2int(const std::string& str, int64_t& out){
-    char* end = nullptr;
+static bool str2int(const std::string &str, int64_t &out)
+{
+    char *end = nullptr;
     out = strtoll(str.c_str(), &end, 10);
     return end == str.c_str() + str.size();
 }
 
-static void expire(std::vector<std::string>& cmd, Buffer& out){
+static void expire(std::vector<std::string> &cmd, Buffer &out)
+{
     int64_t ttl_ms = 0;
-    if(!str2int(cmd[2], ttl_ms)){
+    if (!str2int(cmd[2], ttl_ms))
+    {
         return out_err(out, ERR_BAD_ARG, "expect int64");
     }
 
     Entry key;
     key.key = cmd[1];
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-    if(node){
-        Entry* ent = container_of(node, Entry, node);
+    key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (node)
+    {
+        Entry *ent = container_of(node, Entry, node);
         entry_set_ttl(ent, ttl_ms);
     }
 
     return out_int(out, node ? 1 : 0);
 }
 
-static void get_ttl(std::vector<std::string>& cmd, Buffer& out){
+static void get_ttl(std::vector<std::string> &cmd, Buffer &out)
+{
     Entry key;
     key.key = cmd[1];
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-    if(!node){
+    key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (!node)
+    {
         return out_int(out, -2);
     }
-    
-    Entry* ent = container_of(node, Entry, node);
-    if(ent->heap_idx == (size_t)-1){
+
+    Entry *ent = container_of(node, Entry, node);
+    if (ent->heap_idx == (size_t)-1)
+    {
         return out_int(out, -1);
     }
-    
+
     int64_t expires_at = g_data.heap[ent->heap_idx].val;
     int64_t now_ms = get_monotonic_msec();
     out_int(out, expires_at > now_ms ? (expires_at - now_ms) : 0);
 }
 
-static void do_request(std::vector<std::string>& cmd, Buffer& out){
+static void do_request(std::vector<std::string> &cmd, Buffer &out)
+{
 
-    LOG_DEBUG("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
-         (void*)g_data.db.newer.table,
-         g_data.db.newer.mask,
-         g_data.db.newer.size);
+    spdlog::debug("db state: newer.table={} newer.mask={} newer.size={}",
+                  (void *)g_data.db.newer.table,
+                  g_data.db.newer.mask,
+                  g_data.db.newer.size);
 
-    if(cmd.size() == 1 && cmd[0] == "PING"){
+    if (cmd.size() == 1 && cmd[0] == "PING")
+    {
         std::string ping_msg = "hello client";
-        out_str(out, (const char*)ping_msg.data(), ping_msg.size());
+        out_str(out, (const char *)ping_msg.data(), ping_msg.size());
     }
-    
-    else if(cmd.size() == 2 && cmd[0] == "GET"){
-        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-         cmd[1].c_str());
+
+    else if (cmd.size() == 2 && cmd[0] == "GET")
+    {
+        spdlog::debug("cmd.size={} cmd[0]={} cmd[1]={}",
+                      cmd.size(),
+                      cmd[0].c_str(),
+                      cmd[1].c_str());
         get(cmd, out);
     }
 
-    else if(cmd.size() == 3 && cmd[0] == "SET"){
-        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s cmd[2]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-         cmd[1].c_str(),
-        cmd[2].c_str());
+    else if (cmd.size() == 3 && cmd[0] == "SET")
+    {
+        spdlog::debug("cmd.size={} cmd[0]={} cmd[1]={} cmd[2]=%s",
+                      cmd.size(),
+                      cmd[0].c_str(),
+                      cmd[1].c_str(),
+                      cmd[2].c_str());
         set(cmd, out);
     }
 
-    else if(cmd.size() == 2 && cmd[0] == "EXISTS"){
-        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-         cmd[1].c_str());
+    else if (cmd.size() == 2 && cmd[0] == "EXISTS")
+    {
+        spdlog::debug("cmd.size={} cmd[0]={} cmd[1]={}",
+                      cmd.size(),
+                      cmd[0].c_str(),
+                      cmd[1].c_str());
         exists(cmd, out);
     }
 
-    else if(cmd.size() == 2 && cmd[0] == "DEL"){
-        LOG_DEBUG("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-         cmd.size(),
-         cmd[0].c_str(),
-        cmd[1].c_str());
+    else if (cmd.size() == 2 && cmd[0] == "DEL")
+    {
+        spdlog::debug("cmd.size={} cmd[0]={} cmd[1]={}",
+                      cmd.size(),
+                      cmd[0].c_str(),
+                      cmd[1].c_str());
         del(cmd, out);
     }
 
-    else if(cmd.size() == 1 && cmd[0] == "FLUSH"){
+    else if (cmd.size() == 1 && cmd[0] == "FLUSH")
+    {
         flush(out);
     }
 
-    else if(cmd.size() == 3 && cmd[0] == "EXPIRE"){
+    else if (cmd.size() == 3 && cmd[0] == "EXPIRE")
+    {
         expire(cmd, out);
     }
 
-    else if(cmd.size() == 2 && cmd[0] == "PTTL"){
+    else if (cmd.size() == 2 && cmd[0] == "PTTL")
+    {
         get_ttl(cmd, out);
     }
 
-    else{
+    else
+    {
         out_err(out, ERR_UNKNOWN, "Unknown Command.");
     }
 }
 
-static bool read_u32(const uint8_t*& cur, const uint8_t*& end, uint32_t* out){
-    if(cur + 4 > end) return false;
+static bool read_u32(const uint8_t *&cur, const uint8_t *&end, uint32_t *out)
+{
+    if (cur + 4 > end)
+        return false;
 
     memcpy(out, cur, 4);
     cur += 4;
     return true;
 }
 
-static bool read_str(const uint8_t*& cur, const uint8_t*& end, size_t n, std::string& out){
-    if(cur + n > end) return false;
+static bool read_str(const uint8_t *&cur, const uint8_t *&end, size_t n, std::string &out)
+{
+    if (cur + n > end)
+        return false;
 
     out.assign(cur, cur + n);
     cur += n;
     return true;
 }
 
-static int32_t parse_req(const uint8_t*& data, size_t size, std::vector<std::string>& out){
-    const uint8_t* end = data + size;
+static int32_t parse_req(const uint8_t *&data, size_t size, std::vector<std::string> &out)
+{
+    const uint8_t *end = data + size;
 
     uint32_t nstr = 0;
-    if(!read_u32(data, end, &nstr)) return -1;
+    if (!read_u32(data, end, &nstr))
+        return -1;
 
-    while(out.size() < nstr){
+    while (out.size() < nstr)
+    {
         uint32_t len = 0;
-        if(!read_u32(data, end, &len)) return -1;
+        if (!read_u32(data, end, &len))
+            return -1;
 
         out.push_back(std::string());
-        if(!read_str(data, end, len, out.back())) return -1;
+        if (!read_str(data, end, len, out.back()))
+            return -1;
     }
 
-    if(data != end) return -1;
+    if (data != end)
+        return -1;
 
     return 0;
 }
 
-static void resp_header_alloc(Buffer& out, size_t* header){
+static void resp_header_alloc(Buffer &out, size_t *header)
+{
     *header = out.size();
     buf_append_u32(out, 0);
 }
 
-static size_t resp_size(Buffer& out, size_t header){
+static size_t resp_size(Buffer &out, size_t header)
+{
     return out.size() - header - 4;
 }
 
-static void resp_header_assign(Buffer& out, size_t header){
+static void resp_header_assign(Buffer &out, size_t header)
+{
     size_t msg_size = resp_size(out, header);
-    if(msg_size > k_max_msg){
-        LOG_WARN("Response length exceeded k_max_msg");
+    if (msg_size > k_max_msg)
+    {
+        spdlog::warn("Response length exceeded k_max_msg");
         out.resize(header + 4);
         out_err(out, ERR_TOO_BIG, "Response is too big.");
         msg_size = resp_size(out, header);
     }
 
     uint32_t len = (uint32_t)msg_size;
-    LOG_DEBUG("msg_size = [%d]\n", len);
+    spdlog::debug("msg_size = [{}]\n", len);
     memcpy(&out[header], &len, 4);
 }
 
-static bool try_one_request(Conn* conn){
-    if(conn->incoming.size() < 4) return false;
+static bool try_one_request(Conn *conn)
+{
+    if (conn->incoming.size() < 4)
+        return false;
 
     uint32_t total_len = 0;
     memcpy(&total_len, conn->incoming.data(), 4);
-    if(total_len > k_max_msg){
+    if (total_len > k_max_msg)
+    {
         msg("msg too long");
         conn->want_close = true;
         return false;
     }
 
-    if(4 + total_len > conn->incoming.size()) return false;
+    if (4 + total_len > conn->incoming.size())
+        return false;
 
-    const uint8_t* request = &conn->incoming[4];
-    
+    const uint8_t *request = &conn->incoming[4];
+
     std::vector<std::string> cmd;
-    if(parse_req(request, total_len, cmd) < 0){
+    if (parse_req(request, total_len, cmd) < 0)
+    {
         msg("bad request");
         conn->want_close = true;
         return false;
@@ -491,54 +573,59 @@ static bool try_one_request(Conn* conn){
     return true;
 }
 
-
-static Conn* handle_accept(int fd){
+static Conn *handle_accept(int fd)
+{
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
-    int connfd = accept(fd, (struct sockaddr*) &client_addr, &addrlen);
-    if(connfd < 0){
+    int connfd = accept(fd, (struct sockaddr *)&client_addr, &addrlen);
+    if (connfd < 0)
+    {
         return nullptr;
     }
 
     uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
     uint32_t port = ntohs(client_addr.sin_port);
-    LOG_INFO("NEW CONNECTION [address: %u.%u.%u.%u:%u]\n",
-        (ip >> 24) & 0xFF,
-        (ip >> 16) & 0xFF,
-        (ip >> 8)  & 0xFF,
-        ip & 0xFF,
-        port);
+    spdlog::info("NEW CONNECTION [address: {}.{}.{}.{}:{}]\n",
+                 (ip >> 24) & 0xFF,
+                 (ip >> 16) & 0xFF,
+                 (ip >> 8) & 0xFF,
+                 ip & 0xFF,
+                 port);
 
     fd_set_nb(connfd);
 
-    Conn* conn = new Conn();
+    Conn *conn = new Conn();
     conn->fd = connfd;
     conn->want_read = true;
     conn->last_active_ms = get_monotonic_msec();
     dlist_insert_before(&g_data.idle_list, &conn->idle_node);
     return conn;
-
 }
 
-static void set_write(Conn* conn){
-    if(!conn->want_write && conn->outgoing.size() > 0){
+static void set_write(Conn *conn)
+{
+    if (!conn->want_write && conn->outgoing.size() > 0)
+    {
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
         ev.data.fd = conn->fd;
 
-        if(epoll_ctl(g_data.epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
+        if (epoll_ctl(g_data.epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) < 0)
+        {
             die("epoll_ctl MOD");
         }
 
         conn->want_write = true;
     }
 
-    else if(conn->want_write && conn->outgoing.size() == 0){
+    else if (conn->want_write && conn->outgoing.size() == 0)
+    {
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
         ev.data.fd = conn->fd;
 
-        if(epoll_ctl(g_data.epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
+        if (epoll_ctl(g_data.epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) < 0)
+        {
             die("epoll_ctl MOD");
         }
 
@@ -547,23 +634,29 @@ static void set_write(Conn* conn){
     }
 }
 
-static void handle_write(Conn* conn){
-    if(conn->outgoing.size() == 0) return;
-    
-    while(conn->outgoing.size() > 0){
-        ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
-        if(rv > 0) buf_consume(conn->outgoing, (size_t)rv);
+static void handle_write(Conn *conn)
+{
+    if (conn->outgoing.size() == 0)
+        return;
 
-        else {
-            if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+    while (conn->outgoing.size() > 0)
+    {
+        ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
+        if (rv > 0)
+            buf_consume(conn->outgoing, (size_t)rv);
+
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
 
             conn->want_close = true;
             return;
         }
-
     }
 
-    if(conn->outgoing.size() == 0){
+    if (conn->outgoing.size() == 0)
+    {
         dlist_detach(&conn->io_node);
         conn->last_active_ms = get_monotonic_msec();
         dlist_insert_before(&g_data.io_list, &conn->io_node);
@@ -572,61 +665,82 @@ static void handle_write(Conn* conn){
     set_write(conn);
 }
 
-static void handle_read(Conn* conn){
+static void handle_read(Conn *conn)
+{
     uint8_t buf[64 * 1024];
 
-    if(conn->incoming.size() == 0){
+    if (conn->incoming.size() == 0)
+    {
         conn->io_start_ms = get_monotonic_msec();
         dlist_init(&conn->io_node);
         dlist_insert_before(&g_data.io_list, &conn->io_node);
     }
 
-    while(true){
+    while (true)
+    {
         ssize_t rv = read(conn->fd, buf, sizeof(buf));
 
-        if(rv > 0){
+        if (rv > 0)
+        {
             buf_append(conn->incoming, buf, (size_t)rv);
 
-            while(!conn->want_close && try_one_request(conn)){}
+            while (!conn->want_close && try_one_request(conn))
+            {
+            }
         }
 
-        else if(rv == 0){
-            if(conn->incoming.size() == 0){
-                LOG_INFO("client closed");
+        else if (rv == 0)
+        {
+            if (conn->incoming.size() == 0)
+            {
+                spdlog::info("client closed");
             }
-            else{
+            else
+            {
                 msg("Unexpected EOF");
             }
             conn->want_close = true;
             return;
         }
 
-        else {
-            if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
             conn->want_close = true;
             return;
         }
     }
 
-    if(conn->outgoing.size() > 0){
-            set_write(conn);
+    if (conn->outgoing.size() > 0)
+    {
+        set_write(conn);
     }
 }
 
-static void destroy(Conn* conn){
-    if(epoll_ctl(g_data.epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0) 
-        die("epoll_ctl");
-    close(conn->fd);
-    g_data.fd2conn[conn->fd] = nullptr;
+static void destroy(Conn *conn)
+{
+
+    if (!conn)
+        return;
+
+    if (epoll_ctl(g_data.epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0)
+        spdlog::warn("epoll_ctl DEL failed for fd {}: {}\n", conn->fd, strerror(errno));
+
+    if (conn->fd >= 0 && (size_t)conn->fd < g_data.fd2conn.size())
+        g_data.fd2conn[conn->fd] = nullptr;
+
     dlist_detach(&conn->idle_node);
     dlist_detach(&conn->io_node);
+    close(conn->fd);
     delete conn;
 }
 
 const uint64_t k_idle_timeout_ms = 30 * 1000;
 const uint64_t k_io_timeout_ms = 10 * 1000;
 
-static int64_t next_timer_ms(){
+static int64_t next_timer_ms()
+{
     int64_t now_ms = get_monotonic_msec();
 
     int64_t next_ms = INT64_MAX;
@@ -634,64 +748,80 @@ static int64_t next_timer_ms(){
     int64_t next_io_ms = INT64_MAX;
     int64_t next_ttl_ms = INT64_MAX;
 
-    if(!dlist_empty(&g_data.idle_list)){
-        Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
+    if (!dlist_empty(&g_data.idle_list))
+    {
+        Conn *conn = container_of(g_data.idle_list.next, Conn, idle_node);
         next_idle_ms = conn->last_active_ms + k_idle_timeout_ms;
     }
 
-    if(!dlist_empty(&g_data.io_list)){
-        Conn* conn = container_of(g_data.io_list.next, Conn, io_node);
+    if (!dlist_empty(&g_data.io_list))
+    {
+        Conn *conn = container_of(g_data.io_list.next, Conn, io_node);
         next_io_ms = conn->io_start_ms + k_io_timeout_ms;
     }
 
-    if(!g_data.heap.empty() && g_data.heap[0].val < next_idle_ms){
+    if (!g_data.heap.empty() && g_data.heap[0].val < next_idle_ms)
+    {
         next_ttl_ms = g_data.heap[0].val;
     }
 
     next_ms = std::min(next_idle_ms, std::min(next_io_ms, next_ttl_ms));
-    if(next_ms == INT64_MAX) return -1;
-    if(next_ms <= now_ms) return 0;
+    if (next_ms == INT64_MAX)
+        return -1;
+    if (next_ms <= now_ms)
+        return 0;
     return (next_ms - now_ms);
 }
 
-static void process_timers(){
+static void process_timers()
+{
     int64_t now_ms = get_monotonic_msec();
-    while(!dlist_empty(&g_data.idle_list)){
-        Conn* conn = container_of(g_data.idle_list.next, Conn, idle_node);
+    while (!dlist_empty(&g_data.idle_list))
+    {
+        Conn *conn = container_of(g_data.idle_list.next, Conn, idle_node);
         int64_t next_ms = conn->last_active_ms + k_idle_timeout_ms;
-        if(next_ms >= now_ms) break;
+        if (next_ms >= now_ms)
+            break;
 
-        LOG_WARN("removing idle connection[connection timeout]: %d\n", conn->fd);
+        spdlog::warn("removing idle connection[connection timeout]: {}\n", conn->fd);
         destroy(conn);
     }
 
-    while(!dlist_empty(&g_data.io_list)){
-        Conn* conn = container_of(g_data.io_list.next, Conn, io_node);
+    while (!dlist_empty(&g_data.io_list))
+    {
+        Conn *conn = container_of(g_data.io_list.next, Conn, io_node);
         int64_t end_ms = conn->io_start_ms + k_io_timeout_ms;
-        if(end_ms >= now_ms) break;
+        if (end_ms >= now_ms)
+            break;
 
-        LOG_WARN("removing idle connection[io timeout]: %d\n", conn->fd);
+        spdlog::warn("removing idle connection[io timeout]: {}\n", conn->fd);
         destroy(conn);
     }
 
     size_t k_max_works = 2000;
     size_t n_works = 0;
 
-    while(!g_data.heap.empty() && g_data.heap[0].val < now_ms && n_works < k_max_works){
-        Entry* ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
-        HNode* node = hm_delete(&g_data.db, &ent->node, &entry_eq);
-        if(node != &ent->node){
-            LOG_WARN("key expired: %s\n", ent->key.c_str());
+    while (!g_data.heap.empty() && g_data.heap[0].val < now_ms && n_works < k_max_works)
+    {
+        Entry *ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
+        HNode *node = hm_delete(&g_data.db, &ent->node, &entry_eq);
+        if (node != &ent->node)
+        {
+            spdlog::warn("key expired: {}\n", ent->key.c_str());
         }
         entry_del(ent);
         n_works++;
     }
 }
 
-int main(){
+int main()
+{
+
+    logs::init();
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if(server_fd < 0){
+    if (server_fd < 0)
+    {
         die("socket()");
     }
 
@@ -701,25 +831,29 @@ int main(){
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
     int val = 1;
-    if(setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) < 0){
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) < 0)
+    {
         die("setsockopt()");
     }
 
-    if(bind(server_fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
+    if (bind(server_fd, (sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
         die("bind()");
     }
 
-    if(listen(server_fd, SOMAXCONN) < 0){
+    if (listen(server_fd, SOMAXCONN) < 0)
+    {
         die("listen()");
     }
 
     fd_set_nb(server_fd);
 
-    LOG_INFO("server running on port %d\n", PORT);
+    spdlog::info("server running on port {}\n", PORT);
 
     int epoll_fd = epoll_create1(0);
 
-    if(epoll_fd < 0){
+    if (epoll_fd < 0)
+    {
         die("epoll_create1()");
     }
 
@@ -728,7 +862,8 @@ int main(){
     sev.events = EPOLLIN | EPOLLERR;
     sev.data.fd = server_fd;
 
-    if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &sev) < 0){
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &sev) < 0)
+    {
         die("epoll_ctl()");
     }
 
@@ -736,22 +871,28 @@ int main(){
     dlist_init(&g_data.idle_list);
     dlist_init(&g_data.io_list);
 
-    while(true){
+    while (true)
+    {
 
         int32_t timeout_ms = next_timer_ms();
 
         int n = epoll_wait(epoll_fd, events, MAX_EVENTS, timeout_ms);
-        if(n < 0){
-            if(errno == EINTR) continue;
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
             die("epoll_wait()");
         }
 
-        for(int i = 0; i < n; i++){
+        for (int i = 0; i < n; i++)
+        {
             int fd = events[i].data.fd;
 
-            if(fd == server_fd){
-                Conn* conn;
-                if(!(conn = handle_accept(fd))){
+            if (fd == server_fd)
+            {
+                Conn *conn;
+                if (!(conn = handle_accept(fd)))
+                {
                     msg("connection failed.");
                     continue;
                 }
@@ -759,21 +900,25 @@ int main(){
                 epoll_event cev{};
                 cev.events = EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP;
                 cev.data.fd = conn->fd;
-                if(g_data.fd2conn.size() <= (size_t)conn->fd){
+                if (g_data.fd2conn.size() <= (size_t)conn->fd)
+                {
                     g_data.fd2conn.resize(conn->fd + 1);
                 }
                 g_data.fd2conn[conn->fd] = conn;
 
-                if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->fd, &cev) < 0){
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->fd, &cev) < 0)
+                {
                     msg("epoll_ctl()");
                     continue;
                 }
             }
-            else{
+            else
+            {
 
-                Conn* conn = g_data.fd2conn[fd];
+                Conn *conn = g_data.fd2conn[fd];
 
-                if(!conn) continue;
+                if (!conn)
+                    continue;
 
                 conn->last_active_ms = get_monotonic_msec();
                 dlist_detach(&conn->idle_node);
@@ -781,15 +926,18 @@ int main(){
 
                 int e = events[i].events;
 
-                if(e & EPOLLIN){
+                if (e & EPOLLIN)
+                {
                     handle_read(conn);
                 }
 
-                if(e & EPOLLOUT){
+                if (e & EPOLLOUT)
+                {
                     handle_write(conn);
                 }
 
-                if((e & (EPOLLERR | EPOLLHUP)) || conn->want_close){
+                if ((e & (EPOLLERR | EPOLLHUP)) || conn->want_close)
+                {
 
                     destroy(conn);
                 }

@@ -2,112 +2,137 @@
 #include <assert.h>
 #include "hashtable.h"
 
-const size_t k_max_load_factor = 8;
-const size_t k_max_rehashing = 128;
+namespace hashtable
+{
 
-static void h_init(HTable* htable, size_t n){
-    assert(n > 0 && ((n - 1) & n) == 0);
-    htable->table = (HNode**)calloc(n, sizeof(HNode*));
-    htable->mask = n - 1;
-    htable->size = 0;
-}
+    const size_t k_max_load_factor = 8;
+    const size_t k_max_rehashing = 128;
 
-static void h_insert(HTable* htable, HNode* node){
-    size_t pos = node->hash & htable->mask;
-    node->next = htable->table[pos];
-    htable->table[pos] = node;
-    htable->size++;
-}
-
-static HNode** h_lookup(HTable* htable, HNode* node, bool (*eq)(HNode*, HNode*)){
-    if(!htable->table) return nullptr;
-
-    size_t pos = node->hash & htable->mask;
-    HNode** from = &htable->table[pos];
-    while(*from){
-        if(eq(node, *from)) return from;
-        from = &(*from)->next;
+    static void h_init(HTable *htable, size_t n)
+    {
+        htable->table = (HNode **)calloc(n, sizeof(HNode *));
+        htable->mask = n - 1;
+        htable->size = 0;
     }
 
-    return nullptr;
-}
+    static void h_insert(HTable *htable, HNode *node)
+    {
+        size_t pos = node->hash & htable->mask;
+        node->next = htable->table[pos];
+        htable->table[pos] = node;
+        htable->size++;
+    }
 
-static HNode* h_detach(HTable* htable, HNode** from){
-    HNode* node = *from;
-    *from = node->next;
-    htable->size--;
-    return node;
-}
+    static HNode **h_lookup(HTable *htable, HNode *node, bool (*eq)(HNode *, HNode *))
+    {
+        if (!htable->table)
+            return nullptr;
 
-static void hm_trigger_rehashing(HMap* hmap){
-    assert(hmap->older.table == nullptr);
-    hmap->older = hmap->newer;
-    h_init(&hmap->newer, (hmap->older.mask + 1) * 2);
-    hmap->migrate_pos = 0;
-}
-
-void hm_migrate_keys(HMap* hmap){
-    size_t nwork = 0;
-    while(nwork < k_max_rehashing && hmap->older.size > 0){
-        HNode** from = &hmap->older.table[hmap->migrate_pos];
-        if(!*from){
-            hmap->migrate_pos++;
-            continue;
+        size_t pos = node->hash & htable->mask;
+        HNode **from = &htable->table[pos];
+        while (*from)
+        {
+            if (eq(node, *from))
+                return from;
+            from = &(*from)->next;
         }
-        h_insert(&hmap->newer, h_detach(&hmap->older, from));
-        nwork++;
+
+        return nullptr;
     }
 
-    if(hmap->older.size == 0 && hmap->older.table){
+    static HNode *h_detach(HTable *htable, HNode **from)
+    {
+        HNode *node = *from;
+        *from = node->next;
+        htable->size--;
+        return node;
+    }
+
+    static void hm_trigger_rehashing(HMap *hmap)
+    {
+        assert(hmap->older.table == nullptr);
+        hmap->older = hmap->newer;
+        h_init(&hmap->newer, (hmap->older.mask + 1) * 2);
+        hmap->migrate_pos = 0;
+    }
+
+    void hm_migrate_keys(HMap *hmap)
+    {
+        size_t nwork = 0;
+        while (nwork < k_max_rehashing && hmap->older.size > 0)
+        {
+            HNode **from = &hmap->older.table[hmap->migrate_pos];
+            if (!*from)
+            {
+                hmap->migrate_pos++;
+                continue;
+            }
+            h_insert(&hmap->newer, h_detach(&hmap->older, from));
+            nwork++;
+        }
+
+        if (hmap->older.size == 0 && hmap->older.table)
+        {
+            free(hmap->older.table);
+            hmap->older = HTable{};
+        }
+    }
+
+    HNode *hm_lookup(HMap *hmap, HNode *node, bool (*eq)(HNode *, HNode *))
+    {
+        hm_migrate_keys(hmap);
+        HNode **from = h_lookup(&hmap->newer, node, eq);
+        if (from)
+            return *from;
+
+        from = h_lookup(&hmap->older, node, eq);
+
+        return from ? *from : nullptr;
+    }
+
+    void hm_insert(HMap *hmap, HNode *node)
+    {
+        if (!hmap->newer.table)
+            h_init(&hmap->newer, 4);
+
+        h_insert(&hmap->newer, node);
+        if (!hmap->older.table)
+        {
+            size_t threshold = (hmap->newer.mask + 1) * k_max_load_factor;
+            if (hmap->newer.size >= threshold)
+            {
+                hm_trigger_rehashing(hmap);
+            }
+        }
+
+        hm_migrate_keys(hmap);
+    }
+
+    HNode *hm_delete(HMap *hmap, HNode *node, bool (*eq)(HNode *, HNode *))
+    {
+        if (HNode **found = h_lookup(&hmap->older, node, eq))
+        {
+            return h_detach(&hmap->older, found);
+        }
+
+        else if (HNode **found = h_lookup(&hmap->newer, node, eq))
+        {
+            return h_detach(&hmap->newer, found);
+        }
+
+        return nullptr;
+    }
+
+    void hm_clear(HMap *hmap)
+    {
         free(hmap->older.table);
-        hmap->older = HTable{};
-    }
-}
-
-
-HNode* hm_lookup(HMap* hmap, HNode* node, bool (*eq)(HNode*, HNode*)){
-    hm_migrate_keys(hmap);
-    HNode** from = h_lookup(&hmap->newer, node, eq);
-    if(from) return *from;
-
-    from = h_lookup(&hmap->older, node, eq);
-
-    return from ? *from : nullptr;
-}
-
-void hm_insert(HMap* hmap, HNode* node){
-    if(!hmap->newer.table) h_init(&hmap->newer, 4);
-
-    h_insert(&hmap->newer, node);
-    if(!hmap->older.table){
-        size_t threshold = (hmap->newer.mask + 1) * k_max_load_factor;
-        if(hmap->newer.size >= threshold){
-            hm_trigger_rehashing(hmap);
-        }
+        free(hmap->newer.table);
+        *hmap = HMap{};
     }
 
-    hm_migrate_keys(hmap);
-}
-
-HNode* hm_delete(HMap* hmap, HNode* node, bool (*eq)(HNode*, HNode*)){
-    if(HNode** found = h_lookup(&hmap->older, node, eq)){
-        return h_detach(&hmap->older, &node);
+    size_t hm_size(HMap *hmap)
+    {
+        return hmap->older.size + hmap->newer.size;
     }
 
-    else if(HNode** found = h_lookup(&hmap->newer, node, eq)){
-        return h_detach(&hmap->newer, &node);
-    }
-
-    return nullptr;
-
-}
-
-void hm_clear(HMap* hmap){
-    free(hmap->older.table);
-    free(hmap->newer.table);
-    *hmap = HMap{};
-}
-
-size_t hm_size(HMap* hmap){
-    return hmap->older.size + hmap->newer.size;
 }

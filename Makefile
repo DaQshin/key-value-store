@@ -3,6 +3,7 @@ MODE ?= debug
 BUILD := build
 
 CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
+LDFLAGS := -lspdlog -lfmt
 TESTFLAGS := -lCatch2Main -lCatch2
 BENCHFLAGS := -O2 -DNDEBUG -DLOG_LEVEL=0
 
@@ -12,11 +13,11 @@ SERVER_SRCS = src/server.cpp \
 
 COMMON_SRCS = src/utils/log.cpp
 
-BENCH_SRCS = $(wildcard bench/*.cpp)
+BENCH_SRCS = $(wildcard bench/*/*.cpp)
 TEST_SRCS = $(wildcard tests/*.cpp)
 
 ifeq ($(MODE), debug)
-    CXXFLAGS += -g -O0 -DLOG_LEVEL=0
+    CXXFLAGS += -g -O0 -fsanitize=address,undefined -DLOG_LEVEL=0
 
 else ifeq ($(MODE), release)
 	CXXFLAGS += -O2 -DNDEBUG -DLOG_LEVEL=2
@@ -34,19 +35,19 @@ bench: $(BUILD)/bench
 
 $(BUILD)/client: src/client.cpp $(COMMON_SRCS)
 	mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(BUILD)/server: $(SERVER_SRCS) $(COMMON_SRCS)
 	mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(BUILD)/tests: tests/unit/test_heap.cpp src/storage/heap.cpp
 	mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) -o $@
+	$(CXX) $(CXXFLAGS) $^ $(TESTFLAGS) $(LDFLAGS) -o $@
 
 $(BUILD)/bench: $(BENCH_SRCS)
 	mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $(BENCHFLAGS) $^ -o $@ $(LDFLAGS)
 	
 run_bench: bench 
 			./$(BUILD)/bench
