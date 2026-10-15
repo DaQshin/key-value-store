@@ -133,13 +133,6 @@ static struct
 
 } g_data;
 
-enum
-{
-    T_INIT = 0,
-    T_STR = 1,
-    T_ZSET = 2,
-};
-
 struct Entry
 {
     HNode node;
@@ -149,16 +142,6 @@ struct Entry
     size_t heap_idx = -1;
 
     uint32_t type = 0;
-
-    explicit Entry() {}
-
-    explicit Entry(uint32_t type) : type(type)
-    {
-        if (type == T_STR)
-        {
-            new (&value) std::string;
-        }
-    }
 };
 
 const int64_t k_max_ttl = 10 << 10;
@@ -251,7 +234,7 @@ static void get(std::vector<std::string> &cmd, Buffer &out)
         out_nil(out);
         return;
     }
-    struct Entry key{T_STR};
+    struct Entry key;
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
     HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
@@ -272,7 +255,7 @@ static void get(std::vector<std::string> &cmd, Buffer &out)
 
 static void set(std::vector<std::string> &cmd, Buffer &out)
 {
-    struct Entry key{T_STR};
+    struct Entry key;
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
     HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
@@ -282,11 +265,11 @@ static void set(std::vector<std::string> &cmd, Buffer &out)
     }
     else
     {
-        struct Entry *ent = new Entry(T_STR);
-        ent->key.swap(key.key);
-        ent->value.swap(cmd[2]);
-        ent->node.hash = key.node.hash;
-        hm_insert(&g_data.db, &ent->node);
+        struct Entry ent;
+        ent.key.swap(key.key);
+        ent.value.swap(cmd[2]);
+        ent.node.hash = key.node.hash;
+        hm_insert(&g_data.db, &ent.node);
     }
 
     std::string response = "Operation successful.";
@@ -302,7 +285,7 @@ static void del(std::vector<std::string> &cmd, Buffer &out)
         out_str(out, (const char *)response.data(), response.size());
         return;
     }
-    struct Entry key{T_STR};
+    struct Entry key;
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
     HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
@@ -326,7 +309,7 @@ static void flush(Buffer &out)
 
 static void exists(std::vector<std::string> &cmd, Buffer &out)
 {
-    struct Entry key{T_STR};
+    struct Entry key;
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t *)key.key.data(), key.key.size());
     HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
